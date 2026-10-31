@@ -1,0 +1,49 @@
+---
+source: crates/kakeibo/tests/cli_mvp.rs
+expression: md_default
+---
+# Kakeibo Session Autopsy
+
+## Session `9162aea6-bfa4-43d5-9ae7-fbbacaceafa7` (`claude-code`)
+
+- **Window:** `2026-10-31T09:10:04Z` to `2026-10-31T09:22:42Z` (5 turns)
+- **Models:** `claude-sonnet-4-5`
+- **Project:** `proj:ae84a7a4492c0056`
+- **Totals:** 210,590 prompt (130 fresh / 100,200 write / 110,260 read) + 135 output = 210,725 tokens (measured)
+- **Fixed Overhead:** ~10,000 tokens (estimated: `utf8_bytes_div4_ceil_scaled`)
+- **Cost:** unpriced
+
+### Category Breakdown
+
+| Category | Total | Share | Fresh In | Cache Write | Cache Read | Output | Provenance |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `fixed_overhead` | 50,000 | 23.72% | 0 | 20,000 | 30,000 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+| `resent_history` | 80,260 | 38.08% | 0 | 0 | 80,260 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+| `tool_output` | 80,040 | 37.98% | 0 | 80,040 | 0 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+| `retries` | 0 | 0.00% | 0 | 0 | 0 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+| `user_input` | 150 | 0.07% | 82 | 68 | 0 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+| `assistant_output` | 275 | 0.13% | 48 | 92 | 0 | 135 | estimated: utf8_bytes_div4_ceil_scaled |
+| `subagents` | 0 | 0.00% | 0 | 0 | 0 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+| `compaction` | 0 | 0.00% | 0 | 0 | 0 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+| `unattributed` | 0 | 0.00% | 0 | 0 | 0 | 0 | estimated: utf8_bytes_div4_ceil_scaled |
+
+### Root-Cause Flags
+
+- **`tool-output-bloat`** (turns `2..=5`, 120,000 tokens, estimated: utf8_bytes_div4_ceil_scaled): Bash tool output from turn 2 (~40,000 tokens) was carried across 3 later requests (turns 2..=5) for ~120,000 carried tokens.
+  - `evidence: tool=Bash, turns=2..=5, bytes=160,000 (measured), size=40,000 (estimated: utf8_bytes_div4_ceil_scaled), carried_turns=3, carried_cost=120,000 (estimated: utf8_bytes_div4_ceil_scaled; cache_read=80,000, cache_write=40,000, fresh_in=0)`
+
+### Tool Carry
+
+| Tool | Calls | Results | Errors | Bytes (measured) | Initial | Carried | Lifetime (estimated) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `Bash` | 1 | 1 | 0 | 160,080 | 40,020 | 120,060 | 160,080 |
+
+### Per-Turn Breakdown
+
+| Turn | Timestamp | Model | Prompt (P) | Fresh In | Cache Write | Cache Read | Output | Unattributed Delta |
+|---:|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | `2026-10-31T09:10:04Z` | `claude-sonnet-4-5` | 10,020 | 20 | 10,000 | 0 | 50 | 0 |
+| 2 | `2026-10-31T09:10:12Z` | `claude-sonnet-4-5` | 50,070 | 0 | 40,050 | 10,020 | 20 | 0 |
+| 3 | `2026-10-31T09:10:20Z` | `claude-sonnet-4-5` | 50,120 | 20 | 30 | 50,070 | 20 | 0 |
+| 4 | `2026-10-31T09:22:30Z` | `claude-sonnet-4-5` | 50,170 | 50 | 50,120 | 0 | 20 | 0 |
+| 5 | `2026-10-31T09:22:42Z` | `claude-sonnet-4-5` | 50,210 | 40 | 0 | 50,170 | 25 | 0 |

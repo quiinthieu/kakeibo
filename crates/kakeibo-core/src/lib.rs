@@ -25,6 +25,6 @@ pub use flags::{
 };
 pub use model::{
     AgentId, BlockKind, Category, Confidence, ContentBlock, Timestamp, TimestampError, TurnHints,
-    TurnRecord, UnknownAgentError,
+    TurnRecord, UnknownAgentError, UnknownCategoryError,
 };
 pub use usage::{CacheWriteSplit, DisjointUsageInput, InclusiveUsageInput, Usage, UsageError};
