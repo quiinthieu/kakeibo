@@ -100,3 +100,33 @@ pub fn hash_block_content(tag: &str, content: &str) -> [u8; 8] {
 pub const fn estimate_tokens(bytes: u64) -> u64 {
     bytes.div_ceil(4)
 }
+
+/// Measures the canonical compact UTF-8 byte length of a JSON value without retaining it.
+#[must_use]
+pub fn canonical_json_byte_len(input: &serde_json::Value) -> u64 {
+    let mut canonical_buf = Vec::with_capacity(128);
+    write_canonical_json(input, &mut canonical_buf);
+    let byte_len = canonical_buf.len() as u64;
+    canonical_buf.clear();
+    byte_len
+}
+
+/// Measures raw UTF-8 byte length of a Codex tool argument/input string (`bytes = raw_args.len()`)
+/// and computes a deterministic 16-hex-char SHA-256 `key_hash` over `"tool\0" + tool_name + "\0" + payload`,
+/// canonicalising JSON object keys when `raw_args` is valid JSON.
+#[must_use]
+pub fn hash_codex_tool_arguments(tool_name: &str, raw_args: &str) -> (u64, String) {
+    let byte_len = raw_args.len() as u64;
+    if let Ok(parsed_json) = serde_json::from_str::<serde_json::Value>(raw_args) {
+        let (_, key_hash) = measure_and_hash_tool_input(tool_name, &parsed_json);
+        return (byte_len, key_hash);
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"tool\0");
+    hasher.update(tool_name.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(raw_args.as_bytes());
+    let digest = hasher.finalize();
+    (byte_len, hex_encode_prefix8(&digest))
+}

@@ -41,6 +41,34 @@ fn is_jsonl_file(path: &Path) -> bool {
     path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
 }
 
+fn is_codex_rollout_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    name.ends_with(".jsonl") || name.ends_with(".jsonl.zst")
+}
+
+fn collect_codex_rollouts_recursive(dir: &Path, out: &mut Vec<DiscoveredLog>) -> io::Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_codex_rollouts_recursive(&path, out)?;
+        } else if is_codex_rollout_file(&path) {
+            out.push(DiscoveredLog {
+                agent: AgentId::Codex,
+                path,
+            });
+        }
+    }
+    Ok(())
+}
+
 impl PathCatalog {
     /// Creates an explicit [`PathCatalog`] for isolated testing or custom roots.
     #[must_use]
@@ -166,6 +194,19 @@ impl PathCatalog {
 
         subagents.sort();
         Ok(subagents)
+    }
+
+    /// Discovers Codex CLI rollout logs under `<codex_root>/sessions/**` and
+    /// `<codex_root>/archived_sessions/**` (`*.jsonl` and `*.jsonl.zst`, `PLAN.md` §5).
+    pub fn discover_codex_rollouts(&self) -> io::Result<Vec<DiscoveredLog>> {
+        let Some(root) = self.codex_root() else {
+            return Ok(Vec::new());
+        };
+        let mut logs = Vec::new();
+        collect_codex_rollouts_recursive(&root.join("sessions"), &mut logs)?;
+        collect_codex_rollouts_recursive(&root.join("archived_sessions"), &mut logs)?;
+        logs.sort();
+        Ok(logs)
     }
 }
 

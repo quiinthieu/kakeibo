@@ -23,6 +23,8 @@ pub enum ParseDiagnosticKind {
     InvalidTimestamp,
     /// Token usage counts overflowed `u64` during normalisation.
     UsageOverflow,
+    /// Compressed rollout stream encountered a corrupt or truncated Zstandard frame.
+    DecompressionError,
 }
 
 /// A single 1-based line diagnostic emitted by a tolerant agent decoder.
