@@ -324,7 +324,12 @@ dependencies = [
 name = "kakeibo-report"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "kakeibo-core",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
