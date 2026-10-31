@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kakeibo-core",
+    "crates/kakeibo-parse",
+    "crates/kakeibo-index",
+    "crates/kakeibo-report",
+    "crates/kakeibo",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/quiinthieu/kakeibo"
+homepage = "https://github.com/quiinthieu/kakeibo"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+kakeibo-core = { path = "crates/kakeibo-core", version = "0.1.0" }
+kakeibo-parse = { path = "crates/kakeibo-parse", version = "0.1.0" }
+kakeibo-index = { path = "crates/kakeibo-index", version = "0.1.0" }
+kakeibo-report = { path = "crates/kakeibo-report", version = "0.1.0" }
+
+clap = { version = "4.5", features = ["derive"] }
+toml = "0.8"
+
+assert_cmd = "2.0"
+tempfile = "3.15"

@@ -1,0 +1,6 @@
+/target/
+DerivedData/
+.build/
+.DS_Store
+*.swp
+*~
