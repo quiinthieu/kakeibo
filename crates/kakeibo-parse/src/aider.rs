@@ -14,21 +14,24 @@ use kakeibo_core::{
     AgentId, BlockKind, Confidence, ContentBlock, DisjointUsageInput, Timestamp, TurnHints,
     TurnRecord, Usage,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::catalog::open_readonly;
 use crate::hash::{estimate_tokens, hash_cwd};
 use crate::line_reader::{
-    BoundedLineReader, LineReadOutcome, ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics,
-    DEFAULT_MAX_LINE_BYTES,
+    open_seeked_counting_reader, BoundedLineReader, IncrementalParseResult, LineReadOutcome,
+    ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics, ReadCounter, DEFAULT_MAX_LINE_BYTES,
 };
+use crate::prefilter::{classify_aider_analytics_line, AiderAnalyticsClass, BorrowedAiderEnvelope};
 
+const AIDER_HISTORY_CHECKPOINT_SCHEMA_V1: u32 = 1;
+const AIDER_ANALYTICS_CHECKPOINT_SCHEMA_V1: u32 = 1;
 const EST_METHOD_HISTORY: &str = "aider_history_rounded";
 const EST_METHOD_ANALYTICS: &str = "aider_analytics_no_cache_split";
 
 /// Decoded [`TurnRecord`] batch and per-session diagnostics for a single Aider session.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AiderSessionBatch {
     pub session_id: String,
     pub records: Vec<TurnRecord>,
@@ -280,6 +283,7 @@ fn cwd_hash_from_parent(path: &Path) -> Option<String> {
         .map(hash_cwd)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PendingTurnAccumulator {
     in_prompt_block: bool,
     saw_prompt_line: bool,
@@ -371,6 +375,7 @@ impl PendingTurnAccumulator {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OpenHistorySession {
     ordinal: usize,
     started_ts: Timestamp,
@@ -381,6 +386,16 @@ struct OpenHistorySession {
     turn_accum: PendingTurnAccumulator,
     records: Vec<TurnRecord>,
     diagnostics: ParseDiagnostics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AiderHistoryCheckpoint {
+    schema_version: u32,
+    line_number: usize,
+    completed_sessions: Vec<AiderSessionBatch>,
+    diagnostics: ParseDiagnostics,
+    next_ordinal: usize,
+    current: Option<OpenHistorySession>,
 }
 
 impl OpenHistorySession {
@@ -397,6 +412,18 @@ impl OpenHistorySession {
             records: Vec::new(),
             diagnostics: ParseDiagnostics::default(),
         }
+    }
+
+    fn to_batch(&self) -> Option<AiderSessionBatch> {
+        let session_id = self.session_id.clone()?;
+        if self.records.is_empty() {
+            return None;
+        }
+        Some(AiderSessionBatch {
+            session_id,
+            records: self.records.clone(),
+            diagnostics: self.diagnostics.clone(),
+        })
     }
 
     fn into_batch(self) -> Option<AiderSessionBatch> {
@@ -420,25 +447,99 @@ pub fn parse_aider_history_file(path: &Path) -> io::Result<AiderParseOutput> {
     parse_aider_history_reader(BufReader::new(file), cwd_hash)
 }
 
+/// Incrementally decodes or resumes an Aider `.aider.chat.history.md` file from
+/// `start_offset` and an optional serialized checkpoint (`PLAN.md` §7, §10 T12).
+pub fn parse_aider_history_file_incremental(
+    path: &Path,
+    start_offset: u64,
+    prev_checkpoint_json: Option<&str>,
+    counter: Option<&ReadCounter>,
+) -> io::Result<IncrementalParseResult<AiderParseOutput>> {
+    let cwd_hash = cwd_hash_from_parent(path);
+    let parsed_checkpoint = if start_offset > 0 {
+        prev_checkpoint_json
+            .and_then(|raw| serde_json::from_str::<AiderHistoryCheckpoint>(raw).ok())
+            .filter(|cp| cp.schema_version == AIDER_HISTORY_CHECKPOINT_SCHEMA_V1)
+    } else {
+        None
+    };
+
+    let effective_offset = if parsed_checkpoint.is_some() {
+        start_offset
+    } else {
+        0
+    };
+
+    let (reader, fell_back_to_zero) = open_seeked_counting_reader(path, effective_offset, counter)?;
+    if fell_back_to_zero || effective_offset == 0 {
+        parse_aider_history_reader_incremental(reader, cwd_hash, 0, None)
+    } else {
+        parse_aider_history_reader_incremental(
+            reader,
+            cwd_hash,
+            effective_offset,
+            parsed_checkpoint,
+        )
+    }
+}
+
 /// Streams an Aider `.aider.chat.history.md` reader in bounded memory, dropping all
 /// prompt and response prose immediately.
 pub fn parse_aider_history_reader<R: BufRead>(
     reader: R,
     cwd_hash: Option<String>,
 ) -> io::Result<AiderParseOutput> {
-    let mut line_reader = BoundedLineReader::with_max_line_bytes(reader, DEFAULT_MAX_LINE_BYTES);
-    let mut output = AiderParseOutput::default();
-    let mut next_ordinal: usize = 1;
-    let mut current: Option<OpenHistorySession> = None;
+    Ok(parse_aider_history_reader_incremental(reader, cwd_hash, 0, None)?.output)
+}
 
-    while let Some(outcome) = line_reader.next_line()? {
+fn parse_aider_history_reader_incremental<R: BufRead>(
+    reader: R,
+    cwd_hash: Option<String>,
+    start_offset: u64,
+    checkpoint: Option<AiderHistoryCheckpoint>,
+) -> io::Result<IncrementalParseResult<AiderParseOutput>> {
+    let (start_line, mut completed_sessions, mut diagnostics, mut next_ordinal, mut current) =
+        match checkpoint {
+            Some(cp) => (
+                cp.line_number,
+                cp.completed_sessions,
+                cp.diagnostics,
+                cp.next_ordinal,
+                cp.current,
+            ),
+            None => (0, Vec::new(), ParseDiagnostics::default(), 1, None),
+        };
+
+    let mut line_reader = BoundedLineReader::with_offset_and_line(
+        reader,
+        DEFAULT_MAX_LINE_BYTES,
+        start_offset,
+        start_line,
+    );
+    let mut trailing_partial_snapshot: Option<(u64, AiderHistoryCheckpoint)> = None;
+
+    while let Some((meta, outcome)) = line_reader.next_line_with_meta()? {
+        if !meta.ended_with_newline && trailing_partial_snapshot.is_none() {
+            trailing_partial_snapshot = Some((
+                meta.offset_before,
+                AiderHistoryCheckpoint {
+                    schema_version: AIDER_HISTORY_CHECKPOINT_SCHEMA_V1,
+                    line_number: meta.line_number.saturating_sub(1),
+                    completed_sessions: completed_sessions.clone(),
+                    diagnostics: diagnostics.clone(),
+                    next_ordinal,
+                    current: current.clone(),
+                },
+            ));
+        }
+
         let (line_number, line) = match outcome {
             LineReadOutcome::Line { line_number, text } => (line_number, text),
             LineReadOutcome::Oversized {
                 line_number,
                 byte_len,
             } => {
-                output.diagnostics.issues.push(ParseDiagnostic {
+                diagnostics.issues.push(ParseDiagnostic {
                     line_number,
                     kind: ParseDiagnosticKind::OversizedLine {
                         byte_len,
@@ -448,7 +549,7 @@ pub fn parse_aider_history_reader<R: BufRead>(
                 continue;
             }
             LineReadOutcome::InvalidUtf8 { line_number } => {
-                output.diagnostics.issues.push(ParseDiagnostic {
+                diagnostics.issues.push(ParseDiagnostic {
                     line_number,
                     kind: ParseDiagnosticKind::InvalidUtf8,
                 });
@@ -459,7 +560,7 @@ pub fn parse_aider_history_reader<R: BufRead>(
         if let Some(banner_rest) = line.strip_prefix("# aider chat started at") {
             if let Some(prev) = current.take() {
                 if let Some(batch) = prev.into_batch() {
-                    output.sessions.push(batch);
+                    completed_sessions.push(batch);
                 }
             }
             let ts = parse_aider_banner_timestamp(banner_rest).unwrap_or_else(unix_epoch_ts);
@@ -500,10 +601,7 @@ pub fn parse_aider_history_reader<R: BufRead>(
             if let Some(ver_rest) = meta.strip_prefix("Aider v") {
                 let ver_token = ver_rest.split_whitespace().next().unwrap_or("");
                 if is_safe_version_token(ver_token) {
-                    output
-                        .diagnostics
-                        .cli_versions
-                        .insert(ver_token.to_string());
+                    diagnostics.cli_versions.insert(ver_token.to_string());
                     session
                         .diagnostics
                         .cli_versions
@@ -546,7 +644,7 @@ pub fn parse_aider_history_reader<R: BufRead>(
                         kind: ParseDiagnosticKind::MalformedJson,
                     };
                     session.diagnostics.issues.push(diag.clone());
-                    output.diagnostics.issues.push(diag);
+                    diagnostics.issues.push(diag);
                     session.turn_accum.reset();
                     continue;
                 };
@@ -574,7 +672,7 @@ pub fn parse_aider_history_reader<R: BufRead>(
                         kind: ParseDiagnosticKind::UsageOverflow,
                     };
                     session.diagnostics.issues.push(diag.clone());
-                    output.diagnostics.issues.push(diag);
+                    diagnostics.issues.push(diag);
                     session.turn_accum.reset();
                     continue;
                 };
@@ -623,13 +721,38 @@ pub fn parse_aider_history_reader<R: BufRead>(
         session.turn_accum.push_assistant_or_blank(line);
     }
 
-    if let Some(last) = current.take() {
-        if let Some(batch) = last.into_batch() {
-            output.sessions.push(batch);
+    let mut sessions_out = completed_sessions.clone();
+    if let Some(ref curr) = current {
+        if let Some(batch) = curr.to_batch() {
+            sessions_out.push(batch);
         }
     }
+    let output = AiderParseOutput {
+        sessions: sessions_out,
+        diagnostics: diagnostics.clone(),
+    };
 
-    Ok(output)
+    let (committed_offset, committed_checkpoint) = match trailing_partial_snapshot {
+        Some(snap) => snap,
+        None => (
+            line_reader.bytes_consumed(),
+            AiderHistoryCheckpoint {
+                schema_version: AIDER_HISTORY_CHECKPOINT_SCHEMA_V1,
+                line_number: line_reader.line_number(),
+                completed_sessions,
+                diagnostics,
+                next_ordinal,
+                current,
+            },
+        ),
+    };
+
+    let checkpoint_json = serde_json::to_string(&committed_checkpoint).ok();
+    Ok(IncrementalParseResult {
+        output,
+        committed_offset,
+        checkpoint_json,
+    })
 }
 
 #[derive(Deserialize)]
@@ -672,13 +795,27 @@ fn parse_analytics_timestamp(val: Option<&serde_json::Value>) -> Option<Timestam
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OpenAnalyticsSession {
     ordinal: usize,
     started_ts: Option<Timestamp>,
+    /// Transient `user_id` retained in memory only until the first `message_send`
+    /// derives the irreversible `session_id`; never serialized to checkpoints.
+    #[serde(skip)]
     user_id: String,
     session_id: Option<String>,
     records: Vec<TurnRecord>,
     diagnostics: ParseDiagnostics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AiderAnalyticsCheckpoint {
+    schema_version: u32,
+    line_number: usize,
+    completed_sessions: Vec<AiderSessionBatch>,
+    diagnostics: ParseDiagnostics,
+    next_ordinal: usize,
+    current: Option<OpenAnalyticsSession>,
 }
 
 impl OpenAnalyticsSession {
@@ -691,6 +828,18 @@ impl OpenAnalyticsSession {
             records: Vec::new(),
             diagnostics: ParseDiagnostics::default(),
         }
+    }
+
+    fn to_batch(&self) -> Option<AiderSessionBatch> {
+        let session_id = self.session_id.clone()?;
+        if self.records.is_empty() {
+            return None;
+        }
+        Some(AiderSessionBatch {
+            session_id,
+            records: self.records.clone(),
+            diagnostics: self.diagnostics.clone(),
+        })
     }
 
     fn into_batch(self) -> Option<AiderSessionBatch> {
@@ -714,24 +863,99 @@ pub fn parse_aider_analytics_file(path: &Path) -> io::Result<AiderParseOutput> {
     parse_aider_analytics_reader(BufReader::new(file), cwd_hash)
 }
 
+/// Incrementally decodes or resumes an opt-in Aider `--analytics-log` JSONL file from
+/// `start_offset` and an optional serialized checkpoint (`PLAN.md` §7, §10 T12).
+pub fn parse_aider_analytics_file_incremental(
+    path: &Path,
+    start_offset: u64,
+    prev_checkpoint_json: Option<&str>,
+    counter: Option<&ReadCounter>,
+) -> io::Result<IncrementalParseResult<AiderParseOutput>> {
+    let cwd_hash = cwd_hash_from_parent(path);
+    let parsed_checkpoint = if start_offset > 0 {
+        prev_checkpoint_json
+            .and_then(|raw| serde_json::from_str::<AiderAnalyticsCheckpoint>(raw).ok())
+            .filter(|cp| cp.schema_version == AIDER_ANALYTICS_CHECKPOINT_SCHEMA_V1)
+    } else {
+        None
+    };
+
+    let effective_offset = if parsed_checkpoint.is_some() {
+        start_offset
+    } else {
+        0
+    };
+
+    let (reader, fell_back_to_zero) = open_seeked_counting_reader(path, effective_offset, counter)?;
+    if fell_back_to_zero || effective_offset == 0 {
+        parse_aider_analytics_reader_incremental(reader, cwd_hash, 0, None)
+    } else {
+        parse_aider_analytics_reader_incremental(
+            reader,
+            cwd_hash,
+            effective_offset,
+            parsed_checkpoint,
+        )
+    }
+}
+
 /// Streams an opt-in Aider `--analytics-log` JSONL reader in bounded memory.
 pub fn parse_aider_analytics_reader<R: BufRead>(
     reader: R,
     cwd_hash: Option<String>,
 ) -> io::Result<AiderParseOutput> {
-    let mut line_reader = BoundedLineReader::with_max_line_bytes(reader, DEFAULT_MAX_LINE_BYTES);
-    let mut output = AiderParseOutput::default();
-    let mut next_ordinal: usize = 1;
-    let mut current: Option<OpenAnalyticsSession> = None;
+    Ok(parse_aider_analytics_reader_incremental(reader, cwd_hash, 0, None)?.output)
+}
 
-    while let Some(outcome) = line_reader.next_line()? {
+fn parse_aider_analytics_reader_incremental<R: BufRead>(
+    reader: R,
+    cwd_hash: Option<String>,
+    start_offset: u64,
+    checkpoint: Option<AiderAnalyticsCheckpoint>,
+) -> io::Result<IncrementalParseResult<AiderParseOutput>> {
+    let (start_line, mut completed_sessions, mut diagnostics, mut next_ordinal, mut current) =
+        match checkpoint {
+            Some(cp) => (
+                cp.line_number,
+                cp.completed_sessions,
+                cp.diagnostics,
+                cp.next_ordinal,
+                cp.current,
+            ),
+            None => (0, Vec::new(), ParseDiagnostics::default(), 1, None),
+        };
+
+    let mut line_reader = BoundedLineReader::with_offset_and_line(
+        reader,
+        DEFAULT_MAX_LINE_BYTES,
+        start_offset,
+        start_line,
+    );
+    let mut trailing_partial_snapshot: Option<(u64, AiderAnalyticsCheckpoint)> = None;
+    let mut unmaterialized_launch_snapshot: Option<(u64, AiderAnalyticsCheckpoint)> = None;
+
+    while let Some((meta, outcome)) = line_reader.next_line_with_meta()? {
+        if !meta.ended_with_newline && trailing_partial_snapshot.is_none() {
+            trailing_partial_snapshot = Some((
+                meta.offset_before,
+                AiderAnalyticsCheckpoint {
+                    schema_version: AIDER_ANALYTICS_CHECKPOINT_SCHEMA_V1,
+                    line_number: meta.line_number.saturating_sub(1),
+                    completed_sessions: completed_sessions.clone(),
+                    diagnostics: diagnostics.clone(),
+                    next_ordinal,
+                    current: current.clone(),
+                },
+            ));
+        }
+
         let (line_number, line) = match outcome {
             LineReadOutcome::Line { line_number, text } => (line_number, text),
             LineReadOutcome::Oversized {
                 line_number,
                 byte_len,
             } => {
-                output.diagnostics.issues.push(ParseDiagnostic {
+                diagnostics.issues.push(ParseDiagnostic {
                     line_number,
                     kind: ParseDiagnosticKind::OversizedLine {
                         byte_len,
@@ -741,7 +965,7 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
                 continue;
             }
             LineReadOutcome::InvalidUtf8 { line_number } => {
-                output.diagnostics.issues.push(ParseDiagnostic {
+                diagnostics.issues.push(ParseDiagnostic {
                     line_number,
                     kind: ParseDiagnosticKind::InvalidUtf8,
                 });
@@ -754,8 +978,30 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
             continue;
         }
 
+        if classify_aider_analytics_line(trimmed) == AiderAnalyticsClass::NonTurnFastPath {
+            let Ok(env) = serde_json::from_str::<BorrowedAiderEnvelope<'_>>(trimmed) else {
+                diagnostics.issues.push(ParseDiagnostic {
+                    line_number,
+                    kind: ParseDiagnosticKind::MalformedJson,
+                });
+                continue;
+            };
+            if let Some(ver) = env.properties.version.as_deref() {
+                let ver_trimmed = ver.trim();
+                if is_safe_version_token(ver_trimmed) {
+                    diagnostics.cli_versions.insert(ver_trimmed.to_string());
+                }
+            }
+            let _ = env.event;
+            diagnostics.ignored_records += 1;
+            if let Some(ref mut sess) = current {
+                sess.diagnostics.ignored_records += 1;
+            }
+            continue;
+        }
+
         let Ok(parsed) = serde_json::from_str::<RawAnalyticsEvent>(trimmed) else {
-            output.diagnostics.issues.push(ParseDiagnostic {
+            diagnostics.issues.push(ParseDiagnostic {
                 line_number,
                 kind: ParseDiagnosticKind::MalformedJson,
             });
@@ -765,15 +1011,12 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
         if let Some(ver) = parsed.properties.version.as_deref() {
             let ver_trimmed = ver.trim();
             if is_safe_version_token(ver_trimmed) {
-                output
-                    .diagnostics
-                    .cli_versions
-                    .insert(ver_trimmed.to_string());
+                diagnostics.cli_versions.insert(ver_trimmed.to_string());
             }
         }
 
         let Some(event_name) = parsed.event.as_deref() else {
-            output.diagnostics.ignored_records += 1;
+            diagnostics.ignored_records += 1;
             if let Some(ref mut sess) = current {
                 sess.diagnostics.ignored_records += 1;
             }
@@ -785,9 +1028,20 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
         if event_name == "launched" {
             if let Some(prev) = current.take() {
                 if let Some(batch) = prev.into_batch() {
-                    output.sessions.push(batch);
+                    completed_sessions.push(batch);
                 }
             }
+            unmaterialized_launch_snapshot = Some((
+                meta.offset_before,
+                AiderAnalyticsCheckpoint {
+                    schema_version: AIDER_ANALYTICS_CHECKPOINT_SCHEMA_V1,
+                    line_number: meta.line_number.saturating_sub(1),
+                    completed_sessions: completed_sessions.clone(),
+                    diagnostics: diagnostics.clone(),
+                    next_ordinal,
+                    current: None,
+                },
+            ));
             let mut sess = OpenAnalyticsSession::new(next_ordinal);
             next_ordinal += 1;
             sess.started_ts = event_ts;
@@ -800,13 +1054,13 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
                 sess.user_id = uid.to_string();
             }
             sess.diagnostics.ignored_records += 1;
-            output.diagnostics.ignored_records += 1;
+            diagnostics.ignored_records += 1;
             current = Some(sess);
             continue;
         }
 
         if event_name != "message_send" {
-            output.diagnostics.ignored_records += 1;
+            diagnostics.ignored_records += 1;
             if let Some(ref mut sess) = current {
                 sess.diagnostics.ignored_records += 1;
             }
@@ -822,7 +1076,7 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
         if session.started_ts.is_none() {
             session.started_ts = event_ts;
         }
-        if session.user_id.is_empty() {
+        if session.session_id.is_none() && session.user_id.is_empty() {
             if let Some(uid) = parsed
                 .user_id
                 .as_deref()
@@ -862,7 +1116,7 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
                 kind: ParseDiagnosticKind::UsageOverflow,
             };
             session.diagnostics.issues.push(diag.clone());
-            output.diagnostics.issues.push(diag);
+            diagnostics.issues.push(diag);
             continue;
         };
 
@@ -889,6 +1143,8 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
                     completion_tokens,
                 );
                 session.session_id = Some(derived.clone());
+                session.user_id.clear();
+                unmaterialized_launch_snapshot = None;
                 derived
             }
         };
@@ -908,11 +1164,49 @@ pub fn parse_aider_analytics_reader<R: BufRead>(
         });
     }
 
-    if let Some(last) = current.take() {
-        if let Some(batch) = last.into_batch() {
-            output.sessions.push(batch);
+    let mut sessions_out = completed_sessions.clone();
+    if let Some(ref curr) = current {
+        if let Some(batch) = curr.to_batch() {
+            sessions_out.push(batch);
         }
     }
+    let output = AiderParseOutput {
+        sessions: sessions_out,
+        diagnostics: diagnostics.clone(),
+    };
 
-    Ok(output)
+    let chosen_snapshot = match (unmaterialized_launch_snapshot, trailing_partial_snapshot) {
+        (Some(launch_snap), Some(partial_snap)) => {
+            if launch_snap.0 <= partial_snap.0 {
+                Some(launch_snap)
+            } else {
+                Some(partial_snap)
+            }
+        }
+        (Some(launch_snap), None) => Some(launch_snap),
+        (None, Some(partial_snap)) => Some(partial_snap),
+        (None, None) => None,
+    };
+
+    let (committed_offset, committed_checkpoint) = match chosen_snapshot {
+        Some(snap) => snap,
+        None => (
+            line_reader.bytes_consumed(),
+            AiderAnalyticsCheckpoint {
+                schema_version: AIDER_ANALYTICS_CHECKPOINT_SCHEMA_V1,
+                line_number: line_reader.line_number(),
+                completed_sessions,
+                diagnostics,
+                next_ordinal,
+                current,
+            },
+        ),
+    };
+
+    let checkpoint_json = serde_json::to_string(&committed_checkpoint).ok();
+    Ok(IncrementalParseResult {
+        output,
+        committed_offset,
+        checkpoint_json,
+    })
 }

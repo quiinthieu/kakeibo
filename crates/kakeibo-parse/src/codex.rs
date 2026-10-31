@@ -1,6 +1,7 @@
-//! Tolerant, zero-text-retention streaming JSONL and `.jsonl.zst` decoder for OpenAI Codex CLI (`PLAN.md` §5, §7, §10 T05).
+//! Tolerant, zero-text-retention streaming JSONL and `.jsonl.zst` decoder for OpenAI Codex CLI (`PLAN.md` §5, §7, §10 T05/T12).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::io::{self, BufRead, BufReader};
 use std::mem;
 use std::path::Path;
@@ -9,7 +10,8 @@ use kakeibo_core::{
     AgentId, BlockKind, Confidence, ContentBlock, InclusiveUsageInput, Timestamp, TurnHints,
     TurnRecord, Usage,
 };
-use serde::Deserialize;
+use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::open_readonly;
 use crate::hash::{
@@ -17,9 +19,13 @@ use crate::hash::{
     measure_and_hash_tool_input,
 };
 use crate::line_reader::{
-    BoundedLineReader, LineReadOutcome, ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics,
+    open_seeked_counting_reader, BoundedLineReader, CountingReader, IncrementalParseResult,
+    LineReadOutcome, ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics, ReadCounter,
     DEFAULT_MAX_LINE_BYTES,
 };
+use crate::prefilter::{classify_codex_line, BorrowedCodexEnvelope, CodexLineClass};
+
+const CODEX_CHECKPOINT_SCHEMA_V1: u32 = 1;
 
 /// Zstandard frame magic header (`0xFD2FB528` little-endian).
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
@@ -52,16 +58,6 @@ fn is_safe_version_token(raw: &str) -> bool {
 pub struct CodexParseOutput {
     pub records: Vec<TurnRecord>,
     pub diagnostics: ParseDiagnostics,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawEnvelope<'a> {
-    #[serde(rename = "type")]
-    record_type: Option<&'a str>,
-    #[serde(default)]
-    ordinal: Option<u64>,
-    #[serde(default)]
-    timestamp: Option<&'a str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +100,113 @@ struct RawTurnContextPayload {
     cwd: Option<String>,
 }
 
+/// Zero-copy measurer for Codex `response_item` `content` (`0` heap allocations on string payloads).
+#[derive(Debug)]
+enum MeasuredCodexContent {
+    Null,
+    StringBytes(u64),
+    ArrayParts {
+        /// Byte lengths of elements carrying a `"text"` string field (used by `"message"` items).
+        text_part_bytes: Vec<u64>,
+        /// Total byte length across all elements (used by `"agent_message"` items).
+        total_bytes: u64,
+    },
+    OtherBytes(u64),
+}
+
+impl<'de> Deserialize<'de> for MeasuredCodexContent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ContentVisitor;
+
+        impl<'de> Visitor<'de> for ContentVisitor {
+            type Value = MeasuredCodexContent;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("Codex content value")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(MeasuredCodexContent::StringBytes(v.len() as u64))
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MeasuredCodexContent::Null)
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MeasuredCodexContent::Null)
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(MeasuredCodexContent::OtherBytes(if v { 4 } else { 5 }))
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                let val = serde_json::Value::from(v);
+                Ok(MeasuredCodexContent::OtherBytes(canonical_json_byte_len(
+                    &val,
+                )))
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                let val = serde_json::Value::from(v);
+                Ok(MeasuredCodexContent::OtherBytes(canonical_json_byte_len(
+                    &val,
+                )))
+            }
+
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                let val = serde_json::Value::from(v);
+                Ok(MeasuredCodexContent::OtherBytes(canonical_json_byte_len(
+                    &val,
+                )))
+            }
+
+            fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+                d.deserialize_any(self)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut text_part_bytes = Vec::new();
+                let mut total_bytes: u64 = 0;
+                while let Some(elem) = seq.next_element::<serde_json::Value>()? {
+                    if let Some(text) = elem.get("text").and_then(serde_json::Value::as_str) {
+                        let b = text.len() as u64;
+                        text_part_bytes.push(b);
+                        total_bytes = total_bytes.saturating_add(b);
+                    } else {
+                        total_bytes = total_bytes.saturating_add(canonical_json_byte_len(&elem));
+                    }
+                }
+                Ok(MeasuredCodexContent::ArrayParts {
+                    text_part_bytes,
+                    total_bytes,
+                })
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                let val =
+                    serde_json::Value::deserialize(de::value::MapAccessDeserializer::new(map))?;
+                Ok(MeasuredCodexContent::OtherBytes(canonical_json_byte_len(
+                    &val,
+                )))
+            }
+        }
+
+        deserializer.deserialize_any(ContentVisitor)
+    }
+}
+
+impl MeasuredCodexContent {
+    fn total_bytes(&self) -> u64 {
+        match self {
+            Self::Null => 0,
+            Self::StringBytes(b) | Self::OtherBytes(b) => *b,
+            Self::ArrayParts { total_bytes, .. } => *total_bytes,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RawResponseItemLine {
     #[serde(default)]
@@ -121,7 +224,7 @@ struct RawResponseItemPayload {
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
-    content: Option<serde_json::Value>,
+    content: Option<MeasuredCodexContent>,
     #[serde(default)]
     call_id: Option<String>,
     #[serde(default)]
@@ -131,14 +234,14 @@ struct RawResponseItemPayload {
     #[serde(default)]
     input: Option<String>,
     #[serde(default)]
-    output: Option<serde_json::Value>,
+    output: Option<MeasuredCodexContent>,
     #[serde(default)]
     action: Option<serde_json::Value>,
     #[serde(default)]
     tools: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct RawCodexTokenUsage {
     input_tokens: u64,
     #[serde(default)]
@@ -222,13 +325,13 @@ struct RawRateLimitWindow {
     used_percent: Option<f64>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PendingTcFallback {
     ts: Timestamp,
     usage: Usage,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct CodexSessionState {
     session_id: Option<String>,
     parent_session_id: Option<String>,
@@ -246,9 +349,9 @@ struct CodexSessionState {
     pending_context_window_override: Option<u64>,
     pending_added_blocks: Vec<ContentBlock>,
 
-    seen_item_ids: HashSet<String>,
-    seen_response_ids: HashSet<String>,
-    tool_registry: HashMap<String, (String, String)>,
+    seen_item_ids: BTreeSet<String>,
+    seen_response_ids: BTreeSet<String>,
+    tool_registry: BTreeMap<String, (String, String)>,
 
     saw_any_tur: bool,
     last_turn_from_tc_upgradeable: bool,
@@ -257,6 +360,14 @@ struct CodexSessionState {
     prev_total_usage: Option<RawCodexTokenUsage>,
 
     records: Vec<TurnRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CodexStreamCheckpoint {
+    schema_version: u32,
+    line_number: usize,
+    diagnostics: ParseDiagnostics,
+    state: CodexSessionState,
 }
 
 impl CodexSessionState {
@@ -277,6 +388,33 @@ impl CodexSessionState {
             return;
         };
         self.emit_turn(sid, fb.ts, fb.usage, false, false);
+    }
+
+    fn materialize_records(&self) -> Vec<TurnRecord> {
+        let mut out = self.records.clone();
+        if let (Some(ref fb), Some(ref sid)) = (&self.pending_tc_fallback, &self.session_id) {
+            let turn_num = u32::try_from(out.len() + 1).unwrap_or(u32::MAX);
+            out.push(TurnRecord {
+                agent: AgentId::Codex,
+                session_id: sid.clone(),
+                parent_session_id: self.parent_session_id.clone(),
+                turn: turn_num,
+                ts: fb.ts,
+                model: self.current_model.clone(),
+                cwd_hash: self.current_cwd_hash.clone(),
+                usage: fb.usage.clone(),
+                added: self.pending_added_blocks.clone(),
+                hints: TurnHints {
+                    resume_start: self.pending_resume_start,
+                    compaction: self.pending_compaction,
+                    sidechain: self.session_is_sidechain,
+                    api_error: self.pending_api_error,
+                    rate_limit_used_percent: self.pending_rate_limit_used_percent,
+                    context_window_override: self.pending_context_window_override,
+                },
+            });
+        }
+        out
     }
 
     fn emit_turn(
@@ -338,24 +476,6 @@ fn source_is_subagent(source: Option<&serde_json::Value>) -> bool {
     }
 }
 
-fn measure_content_value_bytes(val: &serde_json::Value) -> u64 {
-    match val {
-        serde_json::Value::Null => 0,
-        serde_json::Value::String(s) => s.len() as u64,
-        serde_json::Value::Array(items) => items
-            .iter()
-            .map(|item| {
-                if let Some(text) = item.get("text").and_then(serde_json::Value::as_str) {
-                    text.len() as u64
-                } else {
-                    canonical_json_byte_len(item)
-                }
-            })
-            .sum(),
-        other => canonical_json_byte_len(other),
-    }
-}
-
 fn extract_response_item(
     payload: RawResponseItemPayload,
     is_inherited_history: bool,
@@ -391,8 +511,7 @@ fn extract_response_item(
                 return;
             };
             match content {
-                serde_json::Value::String(s) => {
-                    let bytes = s.len() as u64;
+                MeasuredCodexContent::StringBytes(bytes) => {
                     state.pending_added_blocks.push(ContentBlock {
                         kind,
                         est_tokens: estimate_tokens(bytes),
@@ -402,22 +521,21 @@ fn extract_response_item(
                         is_error: false,
                     });
                 }
-                serde_json::Value::Array(parts) => {
-                    for part in parts {
-                        if let Some(text) = part.get("text").and_then(serde_json::Value::as_str) {
-                            let bytes = text.len() as u64;
-                            state.pending_added_blocks.push(ContentBlock {
-                                kind,
-                                est_tokens: estimate_tokens(bytes),
-                                bytes,
-                                tool: None,
-                                key_hash: None,
-                                is_error: false,
-                            });
-                        }
+                MeasuredCodexContent::ArrayParts {
+                    text_part_bytes, ..
+                } => {
+                    for bytes in text_part_bytes {
+                        state.pending_added_blocks.push(ContentBlock {
+                            kind,
+                            est_tokens: estimate_tokens(bytes),
+                            bytes,
+                            tool: None,
+                            key_hash: None,
+                            is_error: false,
+                        });
                     }
                 }
-                _ => {}
+                MeasuredCodexContent::Null | MeasuredCodexContent::OtherBytes(_) => {}
             }
         }
         "reasoning" => {
@@ -531,7 +649,7 @@ fn extract_response_item(
                     }
                 });
             let bytes = if let Some(ref out_val) = payload.output {
-                measure_content_value_bytes(out_val)
+                out_val.total_bytes()
             } else if let Some(ref tools_val) = payload.tools {
                 canonical_json_byte_len(tools_val)
             } else {
@@ -554,7 +672,7 @@ fn extract_response_item(
             let bytes = payload
                 .content
                 .as_ref()
-                .map_or(0, measure_content_value_bytes);
+                .map_or(0, MeasuredCodexContent::total_bytes);
             state.pending_added_blocks.push(ContentBlock {
                 kind: BlockKind::SubagentResult,
                 est_tokens: estimate_tokens(bytes),
@@ -574,46 +692,112 @@ fn extract_response_item(
 /// Opens `path` strictly read-only (transparently decompressing `.jsonl.zst` or Zstandard
 /// magic frames) and streams its turns in bounded memory.
 pub fn parse_codex_file(path: &Path) -> io::Result<CodexParseOutput> {
-    let file = open_readonly(path)?;
-    let mut peek_reader = BufReader::new(file);
-    let head = peek_reader.fill_buf()?;
+    Ok(parse_codex_file_incremental(path, 0, None, None)?.output)
+}
 
+/// Incrementally decodes or resumes a Codex CLI `.jsonl` (or cold `.jsonl.zst`) rollout file
+/// from `start_offset` and an optional serialized checkpoint (`PLAN.md` §7, §10 T12).
+pub fn parse_codex_file_incremental(
+    path: &Path,
+    start_offset: u64,
+    prev_checkpoint_json: Option<&str>,
+    counter: Option<&ReadCounter>,
+) -> io::Result<IncrementalParseResult<CodexParseOutput>> {
     let has_zst_ext = path.extension().and_then(|ext| ext.to_str()) == Some("zst");
+    let parsed_checkpoint = if !has_zst_ext && start_offset > 0 {
+        prev_checkpoint_json
+            .and_then(|raw| serde_json::from_str::<CodexStreamCheckpoint>(raw).ok())
+            .filter(|cp| cp.schema_version == CODEX_CHECKPOINT_SCHEMA_V1)
+    } else {
+        None
+    };
+
+    if let Some(cp) = parsed_checkpoint {
+        let (reader, fell_back_to_zero) = open_seeked_counting_reader(path, start_offset, counter)?;
+        if !fell_back_to_zero {
+            return parse_codex_reader_incremental(reader, false, start_offset, Some(cp));
+        }
+        return parse_codex_cold_from_reader(reader, has_zst_ext);
+    }
+
+    let file = open_readonly(path)?;
+    if let Some(c) = counter {
+        c.record_file_open();
+    }
+    let peek_reader = BufReader::new(CountingReader::new(file, counter));
+    parse_codex_cold_from_reader(peek_reader, has_zst_ext)
+}
+
+fn parse_codex_cold_from_reader<R: BufRead>(
+    mut peek_reader: R,
+    has_zst_ext: bool,
+) -> io::Result<IncrementalParseResult<CodexParseOutput>> {
+    let head = peek_reader.fill_buf()?;
     let has_zst_magic = head.len() >= 4 && head[..4] == ZSTD_MAGIC;
 
     if has_zst_ext || has_zst_magic {
         match zstd::stream::read::Decoder::with_buffer(peek_reader) {
-            Ok(decoder) => parse_codex_reader_inner(BufReader::new(decoder), true),
+            Ok(decoder) => parse_codex_reader_incremental(BufReader::new(decoder), true, 0, None),
             Err(_) => {
                 let mut out = CodexParseOutput::default();
                 out.diagnostics.issues.push(ParseDiagnostic {
                     line_number: 1,
                     kind: ParseDiagnosticKind::DecompressionError,
                 });
-                Ok(out)
+                Ok(IncrementalParseResult {
+                    output: out,
+                    committed_offset: 0,
+                    checkpoint_json: None,
+                })
             }
         }
     } else {
-        parse_codex_reader_inner(peek_reader, false)
+        parse_codex_reader_incremental(peek_reader, false, 0, None)
     }
 }
 
 /// Streams Codex CLI rollout records from `reader` using a 16 MiB `BoundedLineReader`.
 pub fn parse_codex_reader<R: BufRead>(reader: R) -> io::Result<CodexParseOutput> {
-    parse_codex_reader_inner(reader, false)
+    Ok(parse_codex_reader_incremental(reader, false, 0, None)?.output)
 }
 
-fn parse_codex_reader_inner<R: BufRead>(
+fn record_unknown_or_ignored_codex_type(other: &str, diagnostics: &mut ParseDiagnostics) {
+    diagnostics.ignored_records += 1;
+    if other != "event_msg" && !KNOWN_NON_TURN_TOP_TYPES.contains(&other) {
+        let safe_key = if is_safe_type_token(other) {
+            other.to_string()
+        } else {
+            "<invalid-type>".to_string()
+        };
+        *diagnostics
+            .unknown_record_types
+            .entry(safe_key)
+            .or_insert(0) += 1;
+    }
+}
+
+fn parse_codex_reader_incremental<R: BufRead>(
     reader: R,
     is_compressed: bool,
-) -> io::Result<CodexParseOutput> {
-    let mut line_reader = BoundedLineReader::with_max_line_bytes(reader, DEFAULT_MAX_LINE_BYTES);
-    let mut diagnostics = ParseDiagnostics::default();
-    let mut state = CodexSessionState::default();
+    start_offset: u64,
+    checkpoint: Option<CodexStreamCheckpoint>,
+) -> io::Result<IncrementalParseResult<CodexParseOutput>> {
+    let (start_line, mut diagnostics, mut state) = match checkpoint {
+        Some(cp) => (cp.line_number, cp.diagnostics, cp.state),
+        None => (0, ParseDiagnostics::default(), CodexSessionState::default()),
+    };
+
+    let mut line_reader = BoundedLineReader::with_offset_and_line(
+        reader,
+        DEFAULT_MAX_LINE_BYTES,
+        start_offset,
+        start_line,
+    );
+    let mut trailing_partial_snapshot: Option<(u64, CodexStreamCheckpoint)> = None;
 
     loop {
-        let outcome = match line_reader.next_line() {
-            Ok(Some(outcome)) => outcome,
+        let (meta, outcome) = match line_reader.next_line_with_meta() {
+            Ok(Some(pair)) => pair,
             Ok(None) => break,
             Err(err) => {
                 if is_compressed {
@@ -626,6 +810,18 @@ fn parse_codex_reader_inner<R: BufRead>(
                 return Err(err);
             }
         };
+
+        if !is_compressed && !meta.ended_with_newline && trailing_partial_snapshot.is_none() {
+            trailing_partial_snapshot = Some((
+                meta.offset_before,
+                CodexStreamCheckpoint {
+                    schema_version: CODEX_CHECKPOINT_SCHEMA_V1,
+                    line_number: meta.line_number.saturating_sub(1),
+                    diagnostics: diagnostics.clone(),
+                    state: state.clone(),
+                },
+            ));
+        }
 
         let (line_number, line) = match outcome {
             LineReadOutcome::Line { line_number, text } => (line_number, text),
@@ -656,7 +852,8 @@ fn parse_codex_reader_inner<R: BufRead>(
             continue;
         }
 
-        let env: RawEnvelope<'_> = match serde_json::from_str(trimmed) {
+        let line_class = classify_codex_line(trimmed);
+        let env: BorrowedCodexEnvelope<'_> = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(_) => {
                 diagnostics.issues.push(ParseDiagnostic {
@@ -667,10 +864,15 @@ fn parse_codex_reader_inner<R: BufRead>(
             }
         };
 
-        let Some(rec_type) = env.record_type else {
+        let Some(rec_type) = env.record_type.as_deref() else {
             diagnostics.ignored_records += 1;
             continue;
         };
+
+        if line_class == CodexLineClass::NonTurnFastPath {
+            record_unknown_or_ignored_codex_type(rec_type, &mut diagnostics);
+            continue;
+        }
 
         match rec_type {
             "session_meta" => {
@@ -793,7 +995,7 @@ fn parse_codex_reader_inner<R: BufRead>(
                         continue;
                     }
                 };
-                let Some(ts_str) = raw.timestamp.as_deref().or(env.timestamp) else {
+                let Some(ts_str) = raw.timestamp.as_deref().or(env.timestamp.as_deref()) else {
                     diagnostics.issues.push(ParseDiagnostic {
                         line_number,
                         kind: ParseDiagnosticKind::MissingField { field: "timestamp" },
@@ -852,8 +1054,6 @@ fn parse_codex_reader_inner<R: BufRead>(
 
                 let usage = normalise_codex_usage(raw_usage);
 
-                // Case A (`tc -> tur` on Turn 1 before `saw_any_tur` was set): upgrade the
-                // adjacent `tc`-emitted turn in-place without double-counting!
                 if state.last_turn_from_tc_upgradeable {
                     if let Some(last) = state.records.last_mut() {
                         last.ts = ts;
@@ -864,8 +1064,6 @@ fn parse_codex_reader_inner<R: BufRead>(
                     continue;
                 }
 
-                // Case B (`tc -> tur` after `saw_any_tur` was already true): consume buffered `tc`
-                // rate_limits/window and clear `pending_tc_fallback`.
                 let already_paired_with_tc = state.pending_tc_fallback.take().is_some();
                 state.emit_turn(sid, ts, usage, !already_paired_with_tc, false);
             }
@@ -898,7 +1096,6 @@ fn parse_codex_reader_inner<R: BufRead>(
                             .filter(|v| v.is_finite());
 
                         let Some(info) = payload.info else {
-                            // Rate-limit-only `token_count` (`info: null`).
                             if let Some(pct) = rl_pct {
                                 if state.last_turn_open_for_trailing_tc {
                                     if let Some(last) = state.records.last_mut() {
@@ -913,8 +1110,6 @@ fn parse_codex_reader_inner<R: BufRead>(
 
                         let ctx_win = info.model_context_window.filter(|&w| w > 0);
 
-                        // Case 1 (`tur -> tc`): attach `rate_limits` & `model_context_window`
-                        // to the immediately preceding `token_usage_record` turn.
                         if state.last_turn_open_for_trailing_tc {
                             if let Some(last) = state.records.last_mut() {
                                 if rl_pct.is_some() {
@@ -931,7 +1126,8 @@ fn parse_codex_reader_inner<R: BufRead>(
                             continue;
                         }
 
-                        let Some(ts_str) = raw.timestamp.as_deref().or(env.timestamp) else {
+                        let Some(ts_str) = raw.timestamp.as_deref().or(env.timestamp.as_deref())
+                        else {
                             diagnostics.issues.push(ParseDiagnostic {
                                 line_number,
                                 kind: ParseDiagnosticKind::MissingField { field: "timestamp" },
@@ -946,7 +1142,6 @@ fn parse_codex_reader_inner<R: BufRead>(
                             continue;
                         };
 
-                        // Suppress duplicate consecutive `tc -> tc` cumulative snapshots.
                         if let (Some(tot), Some(prev)) =
                             (info.total_token_usage, state.prev_total_usage)
                         {
@@ -963,8 +1158,6 @@ fn parse_codex_reader_inner<R: BufRead>(
                             }
                         }
 
-                        // Resolve per-turn raw token counts (`last_token_usage` preferred,
-                        // falling back to cumulative `total_token_usage` deltas).
                         let raw_turn_usage = if let Some(last) = info.last_token_usage {
                             if let Some(tot) = info.total_token_usage {
                                 state.prev_total_usage = Some(tot);
@@ -1024,8 +1217,6 @@ fn parse_codex_reader_inner<R: BufRead>(
 
                         let usage = normalise_codex_usage(raw_turn_usage);
 
-                        // Case 2 (`tc -> tur` when `saw_any_tur` is already active): buffer
-                        // fallback & wait for the paired `token_usage_record`.
                         if state.saw_any_tur {
                             state.pending_tc_fallback = Some(PendingTcFallback { ts, usage });
                             continue;
@@ -1060,28 +1251,42 @@ fn parse_codex_reader_inner<R: BufRead>(
                 state.pending_compaction = true;
                 diagnostics.ignored_records += 1;
             }
-            other if KNOWN_NON_TURN_TOP_TYPES.contains(&other) => {
-                diagnostics.ignored_records += 1;
-            }
             other => {
-                diagnostics.ignored_records += 1;
-                let safe_key = if is_safe_type_token(other) {
-                    other.to_string()
-                } else {
-                    "<invalid-type>".to_string()
-                };
-                *diagnostics
-                    .unknown_record_types
-                    .entry(safe_key)
-                    .or_insert(0) += 1;
+                record_unknown_or_ignored_codex_type(other, &mut diagnostics);
             }
         }
     }
 
-    state.flush_pending_tc_fallback();
+    let output = CodexParseOutput {
+        records: state.materialize_records(),
+        diagnostics: diagnostics.clone(),
+    };
 
-    Ok(CodexParseOutput {
-        records: state.records,
-        diagnostics,
+    if is_compressed {
+        return Ok(IncrementalParseResult {
+            output,
+            committed_offset: 0,
+            checkpoint_json: None,
+        });
+    }
+
+    let (committed_offset, committed_checkpoint) = match trailing_partial_snapshot {
+        Some(snap) => snap,
+        None => (
+            line_reader.bytes_consumed(),
+            CodexStreamCheckpoint {
+                schema_version: CODEX_CHECKPOINT_SCHEMA_V1,
+                line_number: line_reader.line_number(),
+                diagnostics,
+                state,
+            },
+        ),
+    };
+
+    let checkpoint_json = serde_json::to_string(&committed_checkpoint).ok();
+    Ok(IncrementalParseResult {
+        output,
+        committed_offset,
+        checkpoint_json,
     })
 }

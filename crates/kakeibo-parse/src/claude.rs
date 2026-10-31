@@ -1,6 +1,8 @@
-//! Read-only streaming Claude Code JSONL decoder (`PLAN.md` §5, §10 T04, `docs/formats/claude-code.md`).
+//! Read-only streaming Claude Code JSONL decoder (`PLAN.md` §5, §7, §10 T04/T12, `docs/formats/claude-code.md`).
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
@@ -8,14 +10,18 @@ use kakeibo_core::{
     AgentId, BlockKind, CacheWriteSplit, ContentBlock, DisjointUsageInput, Timestamp, TurnHints,
     TurnRecord, Usage,
 };
-use serde::Deserialize;
+use serde::de::{self, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::open_readonly;
 use crate::hash::{estimate_tokens, hash_block_content, hash_cwd, measure_and_hash_tool_input};
 use crate::line_reader::{
-    BoundedLineReader, LineReadOutcome, ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics,
-    DEFAULT_MAX_LINE_BYTES,
+    open_seeked_counting_reader, BoundedLineReader, IncrementalParseResult, LineReadOutcome,
+    ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics, ReadCounter, DEFAULT_MAX_LINE_BYTES,
 };
+use crate::prefilter::{classify_claude_line, BorrowedClaudeEnvelope, ClaudeLineClass};
+
+const CLAUDE_CHECKPOINT_SCHEMA_V1: u32 = 1;
 
 /// Known non-turn record types observed on `Claude Code 2.1.314` (`docs/formats/claude-code.md`).
 const KNOWN_NON_TURN_TYPES: &[&str] = &[
@@ -72,62 +78,659 @@ pub fn parse_claude_file_with_options(
     parse_claude_reader(reader, options)
 }
 
-#[derive(Deserialize)]
-struct TypeEnvelope {
-    #[serde(rename = "type")]
-    record_type: Option<String>,
-    version: Option<String>,
+/// Incrementally decodes or resumes a Claude Code JSONL file from `start_offset` and
+/// an optional serialized checkpoint (`PLAN.md` §7, §10 T12).
+pub fn parse_claude_file_incremental(
+    path: &Path,
+    options: &ClaudeParseOptions,
+    start_offset: u64,
+    prev_checkpoint_json: Option<&str>,
+    counter: Option<&ReadCounter>,
+) -> io::Result<IncrementalParseResult<ClaudeParseOutput>> {
+    let parsed_checkpoint = if start_offset > 0 {
+        prev_checkpoint_json
+            .and_then(|raw| serde_json::from_str::<ClaudeStreamCheckpoint>(raw).ok())
+            .filter(|cp| cp.schema_version == CLAUDE_CHECKPOINT_SCHEMA_V1)
+    } else {
+        None
+    };
+
+    let effective_offset = if parsed_checkpoint.is_some() {
+        start_offset
+    } else {
+        0
+    };
+
+    let (reader, fell_back_to_zero) = open_seeked_counting_reader(path, effective_offset, counter)?;
+    if fell_back_to_zero || effective_offset == 0 {
+        parse_claude_reader_incremental(reader, options, 0, None)
+    } else {
+        parse_claude_reader_incremental(reader, options, effective_offset, parsed_checkpoint)
+    }
 }
 
 #[derive(Deserialize)]
-struct RawSystemLine {
-    #[serde(rename = "sessionId", alias = "session_id")]
-    session_id: Option<String>,
-    #[serde(rename = "agentId")]
-    agent_id: Option<String>,
-    subtype: Option<String>,
+struct RawSystemLine<'a> {
+    #[serde(rename = "sessionId", alias = "session_id", default, borrow)]
+    session_id: Option<Cow<'a, str>>,
+    #[serde(rename = "agentId", default, borrow)]
+    agent_id: Option<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    subtype: Option<Cow<'a, str>>,
+}
+
+/// Zero-allocation string byte-length extractor that tolerates non-string JSON values.
+#[derive(Debug, Clone, Copy, Default)]
+struct OptionalStringBytes(Option<u64>);
+
+impl<'de> Deserialize<'de> for OptionalStringBytes {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct LenVisitor;
+
+        impl<'de> Visitor<'de> for LenVisitor {
+            type Value = OptionalStringBytes;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("any JSON value")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(OptionalStringBytes(Some(v.len() as u64)))
+            }
+
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(OptionalStringBytes(None))
+            }
+
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(OptionalStringBytes(None))
+            }
+
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(OptionalStringBytes(None))
+            }
+
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(OptionalStringBytes(None))
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(OptionalStringBytes(None))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(OptionalStringBytes(None))
+            }
+
+            fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+                d.deserialize_any(self)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(OptionalStringBytes(None))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(OptionalStringBytes(None))
+            }
+        }
+
+        deserializer.deserialize_any(LenVisitor)
+    }
+}
+
+/// Lenient boolean extractor matching `Value::as_bool().unwrap_or(false)`.
+#[derive(Debug, Clone, Copy, Default)]
+struct LenientBool(bool);
+
+impl<'de> Deserialize<'de> for LenientBool {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct BoolVisitor;
+
+        impl<'de> Visitor<'de> for BoolVisitor {
+            type Value = LenientBool;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("any JSON value")
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(LenientBool(v))
+            }
+
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(LenientBool(false))
+            }
+
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(LenientBool(false))
+            }
+
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(LenientBool(false))
+            }
+
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(LenientBool(false))
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(LenientBool(false))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(LenientBool(false))
+            }
+
+            fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+                d.deserialize_any(self)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(LenientBool(false))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(LenientBool(false))
+            }
+        }
+
+        deserializer.deserialize_any(BoolVisitor)
+    }
+}
+
+/// Zero-copy `tool_result.content` byte-length measurer (`0` heap allocations on string payloads).
+#[derive(Debug, Clone, Copy, Default)]
+struct MeasuredToolResultBody(u64);
+
+impl<'de> Deserialize<'de> for MeasuredToolResultBody {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ToolBodyVisitor;
+
+        impl<'de> Visitor<'de> for ToolBodyVisitor {
+            type Value = MeasuredToolResultBody;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("tool_result content payload")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(MeasuredToolResultBody(v.len() as u64))
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MeasuredToolResultBody(0))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MeasuredToolResultBody(0))
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                let val = serde_json::Value::Bool(v);
+                Ok(MeasuredToolResultBody(measure_tool_result_body(Some(&val))))
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                let val = serde_json::Value::from(v);
+                Ok(MeasuredToolResultBody(measure_tool_result_body(Some(&val))))
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                let val = serde_json::Value::from(v);
+                Ok(MeasuredToolResultBody(measure_tool_result_body(Some(&val))))
+            }
+
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                let val = serde_json::Value::from(v);
+                Ok(MeasuredToolResultBody(measure_tool_result_body(Some(&val))))
+            }
+
+            fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+                d.deserialize_any(self)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut total_bytes: u64 = 0;
+                while let Some(elem) = seq.next_element::<ToolResultArrayPart>()? {
+                    total_bytes = total_bytes.saturating_add(elem.0);
+                }
+                Ok(MeasuredToolResultBody(total_bytes))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                let val =
+                    serde_json::Value::deserialize(de::value::MapAccessDeserializer::new(map))?;
+                Ok(MeasuredToolResultBody(measure_tool_result_body(Some(&val))))
+            }
+        }
+
+        deserializer.deserialize_any(ToolBodyVisitor)
+    }
+}
+
+/// Element inside a multi-part `tool_result.content` array (`{"type":"text","text":"..."}` fast path).
+struct ToolResultArrayPart(u64);
+
+impl<'de> Deserialize<'de> for ToolResultArrayPart {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let val = serde_json::Value::deserialize(deserializer)?;
+        let bytes = if let Some(text) = val.get("text").and_then(serde_json::Value::as_str) {
+            text.len() as u64
+        } else {
+            measure_and_hash_tool_input("tool_result_item", &val).0
+        };
+        Ok(ToolResultArrayPart(bytes))
+    }
+}
+
+#[derive(Debug)]
+enum ParsedUserBlock {
+    Text {
+        bytes: u64,
+    },
+    ToolResult {
+        tool_use_id: Option<String>,
+        is_error: bool,
+        bytes: u64,
+    },
+    Ignore,
+}
+
+impl<'de> Deserialize<'de> for ParsedUserBlock {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ItemVisitor;
+
+        impl<'de> Visitor<'de> for ItemVisitor {
+            type Value = ParsedUserBlock;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("user content array element")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut block_type: Option<String> = None;
+                let mut text_bytes: Option<u64> = None;
+                let mut tool_use_id: Option<String> = None;
+                let mut is_error = false;
+                let mut content_bytes: u64 = 0;
+
+                while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                    match key.as_ref() {
+                        "type" => {
+                            block_type = map.next_value::<Option<String>>().unwrap_or(None);
+                        }
+                        "text" => {
+                            text_bytes = map.next_value::<OptionalStringBytes>()?.0;
+                        }
+                        "tool_use_id" => {
+                            tool_use_id = map.next_value::<Option<String>>().unwrap_or(None);
+                        }
+                        "is_error" => {
+                            is_error = map.next_value::<LenientBool>()?.0;
+                        }
+                        "content" => {
+                            content_bytes = map.next_value::<MeasuredToolResultBody>()?.0;
+                        }
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                Ok(match block_type.as_deref() {
+                    Some("text") => ParsedUserBlock::Text {
+                        bytes: text_bytes.unwrap_or(0),
+                    },
+                    Some("tool_result") => ParsedUserBlock::ToolResult {
+                        tool_use_id,
+                        is_error,
+                        bytes: content_bytes,
+                    },
+                    _ => ParsedUserBlock::Ignore,
+                })
+            }
+
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(ParsedUserBlock::Ignore)
+            }
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(ParsedUserBlock::Ignore)
+            }
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(ParsedUserBlock::Ignore)
+            }
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(ParsedUserBlock::Ignore)
+            }
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(ParsedUserBlock::Ignore)
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(ParsedUserBlock::Ignore)
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(ParsedUserBlock::Ignore)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(ParsedUserBlock::Ignore)
+            }
+        }
+
+        deserializer.deserialize_any(ItemVisitor)
+    }
+}
+
+#[derive(Debug)]
+enum MeasuredUserContent {
+    PlainString(u64),
+    Blocks(Vec<ParsedUserBlock>),
+    Other,
+}
+
+impl<'de> Deserialize<'de> for MeasuredUserContent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct UserContentVisitor;
+
+        impl<'de> Visitor<'de> for UserContentVisitor {
+            type Value = MeasuredUserContent;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("user message content")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(MeasuredUserContent::PlainString(v.len() as u64))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut blocks = Vec::new();
+                while let Some(item) = seq.next_element::<ParsedUserBlock>()? {
+                    if !matches!(item, ParsedUserBlock::Ignore) {
+                        blocks.push(item);
+                    }
+                }
+                Ok(MeasuredUserContent::Blocks(blocks))
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MeasuredUserContent::Other)
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MeasuredUserContent::Other)
+            }
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(MeasuredUserContent::Other)
+            }
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(MeasuredUserContent::Other)
+            }
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(MeasuredUserContent::Other)
+            }
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(MeasuredUserContent::Other)
+            }
+            fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+                d.deserialize_any(self)
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(MeasuredUserContent::Other)
+            }
+        }
+
+        deserializer.deserialize_any(UserContentVisitor)
+    }
 }
 
 #[derive(Deserialize)]
-struct RawUserLine {
-    uuid: Option<String>,
+struct RawUserLine<'a> {
+    #[serde(default, borrow)]
+    uuid: Option<Cow<'a, str>>,
     #[serde(rename = "parentUuid", default)]
     parent_uuid: Option<Option<String>>,
-    #[serde(rename = "sessionId", alias = "session_id")]
-    session_id: Option<String>,
-    #[serde(rename = "agentId")]
-    agent_id: Option<String>,
-    cwd: Option<String>,
+    #[serde(rename = "sessionId", alias = "session_id", default, borrow)]
+    session_id: Option<Cow<'a, str>>,
+    #[serde(rename = "agentId", default, borrow)]
+    agent_id: Option<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    cwd: Option<Cow<'a, str>>,
     #[serde(rename = "isCompactSummary", default)]
     is_compact_summary: bool,
-    #[serde(rename = "sourceToolUseID")]
-    source_tool_use_id: Option<String>,
+    #[serde(rename = "sourceToolUseID", default, borrow)]
+    source_tool_use_id: Option<Cow<'a, str>>,
     message: Option<RawUserMessage>,
 }
 
 #[derive(Deserialize)]
 struct RawUserMessage {
-    content: Option<serde_json::Value>,
+    content: Option<MeasuredUserContent>,
+}
+
+/// Zero-copy string length + SHA-256 prefix-8 hasher for `"text"` and `"thinking"` blocks.
+struct HashedField<const IS_THINKING: bool> {
+    bytes: u64,
+    digest: [u8; 8],
+}
+
+impl<const IS_THINKING: bool> Default for HashedField<IS_THINKING> {
+    fn default() -> Self {
+        let tag = if IS_THINKING { "thinking" } else { "text" };
+        Self {
+            bytes: 0,
+            digest: hash_block_content(tag, ""),
+        }
+    }
+}
+
+impl<'de, const IS_THINKING: bool> Deserialize<'de> for HashedField<IS_THINKING> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct HashVisitor<const T: bool>;
+
+        impl<'de, const T: bool> Visitor<'de> for HashVisitor<T> {
+            type Value = HashedField<T>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("assistant block string")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                let tag = if T { "thinking" } else { "text" };
+                Ok(HashedField {
+                    bytes: v.len() as u64,
+                    digest: hash_block_content(tag, v),
+                })
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(HashedField::default())
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(HashedField::default())
+            }
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(HashedField::default())
+            }
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(HashedField::default())
+            }
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(HashedField::default())
+            }
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(HashedField::default())
+            }
+            fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+                d.deserialize_any(self)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(HashedField::default())
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(HashedField::default())
+            }
+        }
+
+        deserializer.deserialize_any(HashVisitor::<IS_THINKING>)
+    }
+}
+
+enum ParsedAssistantItem {
+    Thinking {
+        bytes: u64,
+        digest: [u8; 8],
+    },
+    Text {
+        bytes: u64,
+        digest: [u8; 8],
+    },
+    ToolUse {
+        id: Option<String>,
+        name: String,
+        bytes: u64,
+        key_hash: String,
+    },
+    Ignore,
+}
+
+impl<'de> Deserialize<'de> for ParsedAssistantItem {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct AsstItemVisitor;
+
+        impl<'de> Visitor<'de> for AsstItemVisitor {
+            type Value = ParsedAssistantItem;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("assistant content block")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut block_type: Option<String> = None;
+                let mut thinking_field: Option<HashedField<true>> = None;
+                let mut text_field: Option<HashedField<false>> = None;
+                let mut id: Option<String> = None;
+                let mut name: Option<String> = None;
+                let mut input_val: Option<serde_json::Value> = None;
+
+                while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                    match key.as_ref() {
+                        "type" => {
+                            block_type = map.next_value::<Option<String>>().unwrap_or(None);
+                        }
+                        "thinking" => {
+                            thinking_field = Some(map.next_value::<HashedField<true>>()?);
+                        }
+                        "text" => {
+                            text_field = Some(map.next_value::<HashedField<false>>()?);
+                        }
+                        "id" => {
+                            id = map.next_value::<Option<String>>().unwrap_or(None);
+                        }
+                        "name" => {
+                            name = map.next_value::<Option<String>>().unwrap_or(None);
+                        }
+                        "input" => {
+                            input_val = Some(map.next_value::<serde_json::Value>()?);
+                        }
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                Ok(match block_type.as_deref() {
+                    Some("thinking") => {
+                        let f = thinking_field.unwrap_or_default();
+                        ParsedAssistantItem::Thinking {
+                            bytes: f.bytes,
+                            digest: f.digest,
+                        }
+                    }
+                    Some("text") => {
+                        let f = text_field.unwrap_or_default();
+                        ParsedAssistantItem::Text {
+                            bytes: f.bytes,
+                            digest: f.digest,
+                        }
+                    }
+                    Some("tool_use") => {
+                        let tool_name = name.unwrap_or_else(|| "unknown".to_string());
+                        let tool_id = id.filter(|s| !s.is_empty());
+                        let empty_obj = serde_json::Value::Object(serde_json::Map::new());
+                        let inp = input_val.as_ref().unwrap_or(&empty_obj);
+                        let (bytes, key_hash) = measure_and_hash_tool_input(&tool_name, inp);
+                        ParsedAssistantItem::ToolUse {
+                            id: tool_id,
+                            name: tool_name,
+                            bytes,
+                            key_hash,
+                        }
+                    }
+                    _ => ParsedAssistantItem::Ignore,
+                })
+            }
+
+            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(ParsedAssistantItem::Ignore)
+            }
+            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(ParsedAssistantItem::Ignore)
+            }
+            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(ParsedAssistantItem::Ignore)
+            }
+            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(ParsedAssistantItem::Ignore)
+            }
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(ParsedAssistantItem::Ignore)
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(ParsedAssistantItem::Ignore)
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(ParsedAssistantItem::Ignore)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(ParsedAssistantItem::Ignore)
+            }
+        }
+
+        deserializer.deserialize_any(AsstItemVisitor)
+    }
 }
 
 #[derive(Deserialize)]
-struct RawAssistantLine {
-    uuid: Option<String>,
-    #[serde(rename = "sessionId", alias = "session_id")]
-    session_id: Option<String>,
-    #[serde(rename = "agentId")]
-    agent_id: Option<String>,
-    #[serde(rename = "requestId")]
-    request_id: Option<String>,
-    timestamp: Option<String>,
-    cwd: Option<String>,
+struct RawAssistantLine<'a> {
+    #[serde(default, borrow)]
+    uuid: Option<Cow<'a, str>>,
+    #[serde(rename = "sessionId", alias = "session_id", default, borrow)]
+    session_id: Option<Cow<'a, str>>,
+    #[serde(rename = "agentId", default, borrow)]
+    agent_id: Option<Cow<'a, str>>,
+    #[serde(rename = "requestId", default, borrow)]
+    request_id: Option<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    timestamp: Option<Cow<'a, str>>,
+    #[serde(default, borrow)]
+    cwd: Option<Cow<'a, str>>,
     #[serde(rename = "isSidechain", default)]
     is_sidechain: bool,
     #[serde(rename = "isApiErrorMessage", default)]
     is_api_error_message: bool,
-    #[serde(rename = "apiError")]
-    api_error: Option<serde_json::Value>,
-    error: Option<serde_json::Value>,
+    #[serde(rename = "apiError", default)]
+    api_error: Option<IgnoredAny>,
+    #[serde(default)]
+    error: Option<IgnoredAny>,
     message: Option<RawAssistantMessage>,
 }
 
@@ -135,7 +738,7 @@ struct RawAssistantLine {
 struct RawAssistantMessage {
     id: Option<String>,
     model: Option<String>,
-    content: Option<Vec<serde_json::Value>>,
+    content: Option<Vec<ParsedAssistantItem>>,
     usage: Option<RawClaudeUsage>,
 }
 
@@ -166,7 +769,7 @@ struct RawOutputTokensDetails {
     thinking_tokens: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum BlockFingerprint {
     ToolUseId(String),
     ContentDigest {
@@ -176,6 +779,7 @@ enum BlockFingerprint {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PendingTurn {
     line_number: usize,
     ts: Timestamp,
@@ -195,6 +799,7 @@ struct PendingTurn {
     hints: TurnHints,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionState {
     session_id: String,
     parent_session_id: Option<String>,
@@ -225,6 +830,16 @@ impl SessionState {
             turn_index_by_key: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClaudeStreamCheckpoint {
+    schema_version: u32,
+    line_number: usize,
+    diagnostics: ParseDiagnostics,
+    session_order: Vec<String>,
+    sessions: BTreeMap<String, SessionState>,
+    last_active_session_id: Option<String>,
 }
 
 fn is_safe_type_token(raw: &str) -> bool {
@@ -259,38 +874,30 @@ fn resolve_session_id(
         .map(str::to_string)
 }
 
-fn measure_tool_result_body(body: Option<&serde_json::Value>) -> (u64, [u8; 8]) {
+fn measure_tool_result_body(body: Option<&serde_json::Value>) -> u64 {
     let Some(val) = body else {
-        return (0, hash_block_content("tool_result", ""));
+        return 0;
     };
     match val {
-        serde_json::Value::String(s) => (s.len() as u64, hash_block_content("tool_result", s)),
+        serde_json::Value::String(s) => s.len() as u64,
         serde_json::Value::Array(items) => {
             let mut total_bytes: u64 = 0;
-            let mut combined_hash = [0_u8; 8];
             for item in items {
                 if let Some(text) = item.get("text").and_then(serde_json::Value::as_str) {
                     total_bytes = total_bytes.saturating_add(text.len() as u64);
-                    let h = hash_block_content("tool_result_part", text);
-                    for (dst, src) in combined_hash.iter_mut().zip(h.iter()) {
-                        *dst ^= *src;
-                    }
                 } else {
                     let (b, _) = measure_and_hash_tool_input("tool_result_item", item);
                     total_bytes = total_bytes.saturating_add(b);
                 }
             }
-            (total_bytes, combined_hash)
+            total_bytes
         }
-        other => {
-            let (b, kh) = measure_and_hash_tool_input("tool_result_obj", other);
-            (b, hash_block_content("tool_result_obj", &kh))
-        }
+        other => measure_and_hash_tool_input("tool_result_obj", other).0,
     }
 }
 
 fn extract_user_blocks(
-    content: &serde_json::Value,
+    content: MeasuredUserContent,
     is_compact_summary: bool,
     fallback_tool_use_id: Option<&str>,
     tool_registry: &BTreeMap<String, (String, String)>,
@@ -303,8 +910,7 @@ fn extract_user_blocks(
     };
 
     match content {
-        serde_json::Value::String(s) => {
-            let bytes = s.len() as u64;
+        MeasuredUserContent::PlainString(bytes) => {
             out.push(ContentBlock {
                 kind: text_kind,
                 est_tokens: estimate_tokens(bytes),
@@ -314,17 +920,10 @@ fn extract_user_blocks(
                 is_error: false,
             });
         }
-        serde_json::Value::Array(items) => {
+        MeasuredUserContent::Blocks(items) => {
             for item in items {
-                let Some(block_type) = item.get("type").and_then(serde_json::Value::as_str) else {
-                    continue;
-                };
-                match block_type {
-                    "text" => {
-                        let bytes = item
-                            .get("text")
-                            .and_then(serde_json::Value::as_str)
-                            .map_or(0, |s| s.len() as u64);
+                match item {
+                    ParsedUserBlock::Text { bytes } => {
                         out.push(ContentBlock {
                             kind: text_kind,
                             est_tokens: estimate_tokens(bytes),
@@ -334,21 +933,17 @@ fn extract_user_blocks(
                             is_error: false,
                         });
                     }
-                    "tool_result" => {
-                        let tool_use_id = item
-                            .get("tool_use_id")
-                            .and_then(serde_json::Value::as_str)
-                            .or(fallback_tool_use_id);
-                        let (tool, key_hash) = tool_use_id
+                    ParsedUserBlock::ToolResult {
+                        tool_use_id,
+                        is_error,
+                        bytes,
+                    } => {
+                        let resolved_id = tool_use_id.as_deref().or(fallback_tool_use_id);
+                        let (tool, key_hash) = resolved_id
                             .and_then(|id| tool_registry.get(id))
                             .map_or((None, None), |(name, kh)| {
                                 (Some(name.clone()), Some(kh.clone()))
                             });
-                        let is_error = item
-                            .get("is_error")
-                            .and_then(serde_json::Value::as_bool)
-                            .unwrap_or(false);
-                        let (bytes, _) = measure_tool_result_body(item.get("content"));
                         out.push(ContentBlock {
                             kind: BlockKind::ToolResult,
                             est_tokens: estimate_tokens(bytes),
@@ -358,11 +953,11 @@ fn extract_user_blocks(
                             is_error,
                         });
                     }
-                    _ => {}
+                    ParsedUserBlock::Ignore => {}
                 }
             }
         }
-        _ => {}
+        MeasuredUserContent::Other => {}
     }
 }
 
@@ -373,22 +968,13 @@ struct ExtractedAssistantBlock {
 }
 
 fn extract_assistant_blocks(
-    items: &[serde_json::Value],
+    items: Vec<ParsedAssistantItem>,
     tool_registry: &mut BTreeMap<String, (String, String)>,
 ) -> Vec<ExtractedAssistantBlock> {
     let mut extracted = Vec::with_capacity(items.len());
     for item in items {
-        let Some(block_type) = item.get("type").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        match block_type {
-            "thinking" => {
-                let text = item
-                    .get("thinking")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let bytes = text.len() as u64;
-                let digest = hash_block_content("thinking", text);
+        match item {
+            ParsedAssistantItem::Thinking { bytes, digest } => {
                 extracted.push(ExtractedAssistantBlock {
                     fingerprint: BlockFingerprint::ContentDigest {
                         kind: BlockKind::AssistantThinking,
@@ -406,13 +992,7 @@ fn extract_assistant_blocks(
                     },
                 });
             }
-            "text" => {
-                let text = item
-                    .get("text")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let bytes = text.len() as u64;
-                let digest = hash_block_content("text", text);
+            ParsedAssistantItem::Text { bytes, digest } => {
                 extracted.push(ExtractedAssistantBlock {
                     fingerprint: BlockFingerprint::ContentDigest {
                         kind: BlockKind::AssistantText,
@@ -430,48 +1010,39 @@ fn extract_assistant_blocks(
                     },
                 });
             }
-            "tool_use" => {
-                let tool_name = item
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown")
-                    .to_string();
-                let tool_id = item
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string);
-                let empty_obj = serde_json::Value::Object(serde_json::Map::new());
-                let input_val = item.get("input").unwrap_or(&empty_obj);
-                let (bytes, key_hash) = measure_and_hash_tool_input(&tool_name, input_val);
-
-                if let Some(ref id) = tool_id {
-                    tool_registry.insert(id.clone(), (tool_name.clone(), key_hash.clone()));
+            ParsedAssistantItem::ToolUse {
+                id,
+                name,
+                bytes,
+                key_hash,
+            } => {
+                if let Some(ref tool_id) = id {
+                    tool_registry.insert(tool_id.clone(), (name.clone(), key_hash.clone()));
                 }
 
-                let fingerprint = match &tool_id {
-                    Some(id) => BlockFingerprint::ToolUseId(id.clone()),
+                let fingerprint = match &id {
+                    Some(tool_id) => BlockFingerprint::ToolUseId(tool_id.clone()),
                     None => BlockFingerprint::ContentDigest {
                         kind: BlockKind::ToolUse,
-                        digest: hash_block_content(&tool_name, &key_hash),
+                        digest: hash_block_content(&name, &key_hash),
                         bytes,
                     },
                 };
 
                 extracted.push(ExtractedAssistantBlock {
                     fingerprint,
-                    tool_use_id: tool_id,
+                    tool_use_id: id,
                     block: ContentBlock {
                         kind: BlockKind::ToolUse,
                         est_tokens: estimate_tokens(bytes),
                         bytes,
-                        tool: Some(tool_name),
+                        tool: Some(name),
                         key_hash: Some(key_hash),
                         is_error: false,
                     },
                 });
             }
-            _ => {}
+            ParsedAssistantItem::Ignore => {}
         }
     }
     extracted
@@ -496,20 +1067,131 @@ fn merge_assistant_blocks(turn: &mut PendingTurn, incoming: Vec<ExtractedAssista
     }
 }
 
+fn record_non_turn_type(other: &str, diagnostics: &mut ParseDiagnostics) {
+    diagnostics.ignored_records += 1;
+    if !KNOWN_NON_TURN_TYPES.contains(&other) {
+        let safe_key = if is_safe_type_token(other) {
+            other.to_string()
+        } else {
+            "<invalid-type>".to_string()
+        };
+        *diagnostics
+            .unknown_record_types
+            .entry(safe_key)
+            .or_insert(0) += 1;
+    }
+}
+
+fn materialize_claude_output(
+    session_order: &[String],
+    sessions: &BTreeMap<String, SessionState>,
+    base_diagnostics: &ParseDiagnostics,
+) -> ClaudeParseOutput {
+    let mut diagnostics = base_diagnostics.clone();
+    let mut records = Vec::new();
+
+    for sid in session_order {
+        let Some(state) = sessions.get(sid) else {
+            continue;
+        };
+        let mut turn_ordinal: u32 = 0;
+        for pending in &state.turns {
+            let mut disjoint = DisjointUsageInput::measured(
+                pending.raw_input,
+                pending.raw_cache_write,
+                pending.raw_cache_read,
+                pending.raw_output,
+            );
+            disjoint.reasoning_tokens = pending.thinking_tokens;
+            if pending.has_cache_split {
+                disjoint.cache_write_split = Some(CacheWriteSplit {
+                    ephemeral_5m: pending.ephemeral_5m,
+                    ephemeral_1h: pending.ephemeral_1h,
+                });
+            }
+
+            let Ok(usage) = Usage::from_disjoint(disjoint) else {
+                diagnostics.issues.push(ParseDiagnostic {
+                    line_number: pending.line_number,
+                    kind: ParseDiagnosticKind::UsageOverflow,
+                });
+                continue;
+            };
+
+            turn_ordinal = turn_ordinal.saturating_add(1);
+            records.push(TurnRecord {
+                agent: AgentId::ClaudeCode,
+                session_id: state.session_id.clone(),
+                parent_session_id: state.parent_session_id.clone(),
+                turn: turn_ordinal,
+                ts: pending.ts,
+                model: pending.model.clone(),
+                cwd_hash: pending.cwd_hash.clone(),
+                usage,
+                added: pending.added.clone(),
+                hints: pending.hints.clone(),
+            });
+        }
+    }
+
+    ClaudeParseOutput {
+        records,
+        diagnostics,
+    }
+}
+
 /// Streams a buffered Claude Code JSONL reader into deduplicated [`TurnRecord`] items.
 pub fn parse_claude_reader<R: BufRead>(
     reader: R,
     options: &ClaudeParseOptions,
 ) -> io::Result<ClaudeParseOutput> {
+    Ok(parse_claude_reader_incremental(reader, options, 0, None)?.output)
+}
+
+fn parse_claude_reader_incremental<R: BufRead>(
+    reader: R,
+    options: &ClaudeParseOptions,
+    start_offset: u64,
+    checkpoint: Option<ClaudeStreamCheckpoint>,
+) -> io::Result<IncrementalParseResult<ClaudeParseOutput>> {
     let max_line = options.max_line_bytes.unwrap_or(DEFAULT_MAX_LINE_BYTES);
-    let mut line_reader = BoundedLineReader::with_max_line_bytes(reader, max_line);
+    let (start_line, mut diagnostics, mut session_order, mut sessions, mut last_active_session_id) =
+        match checkpoint {
+            Some(cp) => (
+                cp.line_number,
+                cp.diagnostics,
+                cp.session_order,
+                cp.sessions,
+                cp.last_active_session_id,
+            ),
+            None => (
+                0,
+                ParseDiagnostics::default(),
+                Vec::new(),
+                BTreeMap::new(),
+                None,
+            ),
+        };
 
-    let mut diagnostics = ParseDiagnostics::default();
-    let mut session_order: Vec<String> = Vec::new();
-    let mut sessions: BTreeMap<String, SessionState> = BTreeMap::new();
-    let mut last_active_session_id: Option<String> = None;
+    let mut line_reader =
+        BoundedLineReader::with_offset_and_line(reader, max_line, start_offset, start_line);
+    let mut trailing_partial_snapshot: Option<(u64, ClaudeStreamCheckpoint)> = None;
 
-    while let Some(outcome) = line_reader.next_line()? {
+    while let Some((meta, outcome)) = line_reader.next_line_with_meta()? {
+        if !meta.ended_with_newline && trailing_partial_snapshot.is_none() {
+            trailing_partial_snapshot = Some((
+                meta.offset_before,
+                ClaudeStreamCheckpoint {
+                    schema_version: CLAUDE_CHECKPOINT_SCHEMA_V1,
+                    line_number: meta.line_number.saturating_sub(1),
+                    diagnostics: diagnostics.clone(),
+                    session_order: session_order.clone(),
+                    sessions: sessions.clone(),
+                    last_active_session_id: last_active_session_id.clone(),
+                },
+            ));
+        }
+
         let (line_number, text) = match outcome {
             LineReadOutcome::Line { line_number, text } => (line_number, text),
             LineReadOutcome::Oversized {
@@ -539,7 +1221,8 @@ pub fn parse_claude_reader<R: BufRead>(
             continue;
         }
 
-        let envelope: TypeEnvelope = match serde_json::from_str(trimmed) {
+        let line_class = classify_claude_line(trimmed);
+        let envelope: BorrowedClaudeEnvelope<'_> = match serde_json::from_str(trimmed) {
             Ok(env) => env,
             Err(_) => {
                 diagnostics.issues.push(ParseDiagnostic {
@@ -552,7 +1235,7 @@ pub fn parse_claude_reader<R: BufRead>(
 
         if let Some(ref ver) = envelope.version {
             if is_safe_version_token(ver) {
-                diagnostics.cli_versions.insert(ver.clone());
+                diagnostics.cli_versions.insert(ver.to_string());
             }
         }
 
@@ -561,9 +1244,14 @@ pub fn parse_claude_reader<R: BufRead>(
             continue;
         };
 
+        if line_class == ClaudeLineClass::NonTurnFastPath {
+            record_non_turn_type(rec_type, &mut diagnostics);
+            continue;
+        }
+
         match rec_type {
             "user" => {
-                let raw: RawUserLine = match serde_json::from_str(trimmed) {
+                let raw: RawUserLine<'_> = match serde_json::from_str(trimmed) {
                     Ok(v) => v,
                     Err(_) => {
                         diagnostics.issues.push(ParseDiagnostic {
@@ -596,7 +1284,7 @@ pub fn parse_claude_reader<R: BufRead>(
                 });
 
                 if let Some(ref uuid) = raw.uuid {
-                    if !uuid.is_empty() && !state.seen_event_uuids.insert(uuid.clone()) {
+                    if !uuid.is_empty() && !state.seen_event_uuids.insert(uuid.to_string()) {
                         continue;
                     }
                 }
@@ -618,7 +1306,7 @@ pub fn parse_claude_reader<R: BufRead>(
                 }
 
                 if let Some(msg) = raw.message {
-                    if let Some(ref content) = msg.content {
+                    if let Some(content) = msg.content {
                         extract_user_blocks(
                             content,
                             raw.is_compact_summary,
@@ -630,7 +1318,7 @@ pub fn parse_claude_reader<R: BufRead>(
                 }
             }
             "assistant" => {
-                let raw: RawAssistantLine = match serde_json::from_str(trimmed) {
+                let raw: RawAssistantLine<'_> = match serde_json::from_str(trimmed) {
                     Ok(v) => v,
                     Err(_) => {
                         diagnostics.issues.push(ParseDiagnostic {
@@ -659,7 +1347,7 @@ pub fn parse_claude_reader<R: BufRead>(
                 });
 
                 if let Some(ref uuid) = raw.uuid {
-                    if !uuid.is_empty() && !state.seen_event_uuids.insert(uuid.clone()) {
+                    if !uuid.is_empty() && !state.seen_event_uuids.insert(uuid.to_string()) {
                         continue;
                     }
                 }
@@ -695,9 +1383,6 @@ pub fn parse_claude_reader<R: BufRead>(
                     continue;
                 };
 
-                // Verified Claude Code 2.1.314: synthetic local API error lines carry
-                // zeroed usage counts and must mark the subsequent retried request rather
-                // than emitting a bogus 0-token turn.
                 if is_error_line
                     && raw_usage.input_tokens == 0
                     && raw_usage.cache_creation_input_tokens == 0
@@ -748,7 +1433,7 @@ pub fn parse_claude_reader<R: BufRead>(
                 };
 
                 let extracted_blocks = extract_assistant_blocks(
-                    msg.content.as_deref().unwrap_or(&[]),
+                    msg.content.unwrap_or_default(),
                     &mut state.tool_registry,
                 );
                 let thinking = raw_usage
@@ -835,7 +1520,7 @@ pub fn parse_claude_reader<R: BufRead>(
             }
             "system" => {
                 diagnostics.ignored_records += 1;
-                if let Ok(sys) = serde_json::from_str::<RawSystemLine>(trimmed) {
+                if let Ok(sys) = serde_json::from_str::<RawSystemLine<'_>>(trimmed) {
                     if let Some(sid) = resolve_session_id(
                         sys.session_id.as_deref(),
                         sys.agent_id.as_deref(),
@@ -857,74 +1542,32 @@ pub fn parse_claude_reader<R: BufRead>(
                     }
                 }
             }
-            other if KNOWN_NON_TURN_TYPES.contains(&other) => {
-                diagnostics.ignored_records += 1;
-            }
             other => {
-                diagnostics.ignored_records += 1;
-                let safe_key = if is_safe_type_token(other) {
-                    other.to_string()
-                } else {
-                    "<invalid-type>".to_string()
-                };
-                *diagnostics
-                    .unknown_record_types
-                    .entry(safe_key)
-                    .or_insert(0) += 1;
+                record_non_turn_type(other, &mut diagnostics);
             }
         }
     }
 
-    let mut records = Vec::new();
-    for sid in session_order {
-        let Some(state) = sessions.remove(&sid) else {
-            continue;
-        };
-        let mut turn_ordinal: u32 = 0;
-        for pending in state.turns {
-            let mut disjoint = DisjointUsageInput::measured(
-                pending.raw_input,
-                pending.raw_cache_write,
-                pending.raw_cache_read,
-                pending.raw_output,
-            );
-            disjoint.reasoning_tokens = pending.thinking_tokens;
-            if pending.has_cache_split {
-                disjoint.cache_write_split = Some(CacheWriteSplit {
-                    ephemeral_5m: pending.ephemeral_5m,
-                    ephemeral_1h: pending.ephemeral_1h,
-                });
-            }
+    let output = materialize_claude_output(&session_order, &sessions, &diagnostics);
+    let (committed_offset, committed_checkpoint) = match trailing_partial_snapshot {
+        Some(snap) => snap,
+        None => (
+            line_reader.bytes_consumed(),
+            ClaudeStreamCheckpoint {
+                schema_version: CLAUDE_CHECKPOINT_SCHEMA_V1,
+                line_number: line_reader.line_number(),
+                diagnostics,
+                session_order,
+                sessions,
+                last_active_session_id,
+            },
+        ),
+    };
 
-            let usage = match Usage::from_disjoint(disjoint) {
-                Ok(u) => u,
-                Err(_) => {
-                    diagnostics.issues.push(ParseDiagnostic {
-                        line_number: pending.line_number,
-                        kind: ParseDiagnosticKind::UsageOverflow,
-                    });
-                    continue;
-                }
-            };
-
-            turn_ordinal = turn_ordinal.saturating_add(1);
-            records.push(TurnRecord {
-                agent: AgentId::ClaudeCode,
-                session_id: state.session_id.clone(),
-                parent_session_id: state.parent_session_id.clone(),
-                turn: turn_ordinal,
-                ts: pending.ts,
-                model: pending.model,
-                cwd_hash: pending.cwd_hash,
-                usage,
-                added: pending.added,
-                hints: pending.hints,
-            });
-        }
-    }
-
-    Ok(ClaudeParseOutput {
-        records,
-        diagnostics,
+    let checkpoint_json = serde_json::to_string(&committed_checkpoint).ok();
+    Ok(IncrementalParseResult {
+        output,
+        committed_offset,
+        checkpoint_json,
     })
 }
