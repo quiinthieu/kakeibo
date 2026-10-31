@@ -201,7 +201,7 @@ Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claud
   *AC:* round-trip tests; `fresh+write+read == P` property for both conventions.
 - [x] **T04 Claude Code parser.** Discovery, streaming, dedupe (max output), block sizing with text dropped, tool names/`key_hash`, resume/compaction/sidechain hints *(verify)*.
   *AC:* `basic`/`streaming-dupes` match `expected.json` exactly; `hostile` → diagnostics, no panic; privacy grep clean.
-- [ ] **T05 Codex parser.** Rollouts (+ archived, `CODEX_HOME`), `session_meta`/`turn_context`, usage precedence, fork history, `rate_limits`.
+- [x] **T05 Codex parser.** Rollouts (+ archived, `CODEX_HOME`), `session_meta`/`turn_context`, usage precedence, fork history, `rate_limits`.
   *AC:* `codex-dual-usage` not double counted; cumulative-only fixture gives correct deltas; cached never added to input.
 - [ ] **T06 Attribution engine.** Estimator ADR, scaling, carry, categories, `Unattributed`.
   *AC:* reconciliation property on all fixtures; `tool-bloat` carried cost equals a hand-computed value.
