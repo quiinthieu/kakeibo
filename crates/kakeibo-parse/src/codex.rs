@@ -564,10 +564,8 @@ fn extract_response_item(
                 is_error: false,
             });
         }
-        "compaction" => {
-            if !is_inherited_history {
-                state.pending_compaction = true;
-            }
+        "compaction" if !is_inherited_history => {
+            state.pending_compaction = true;
         }
         _ => {}
     }
