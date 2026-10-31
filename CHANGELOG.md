@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-31
+
 ### Added
+- MVP terminal CLI (`kakeibo`) covering the default recent-sessions view, `sessions [--agent] [--since] [--project]`, `autopsy <id|latest> [--turns] [--category]`, `flags [--since]`, `top --by category|tool|project|flag [--since]`, `export <id|--since> --format json|md|ndjson [--out] [--show-paths]`, `doctor`, and `--no-cache`, with read-only Claude Code + Codex subagent rollup and corpus `user_median_p1` computation (T08).
+- Versioned CLI JSON export v1 specification (`docs/cli-schema.md`, `schemaVersion: 1`), structured JSON/Markdown/table/doctor report builders (`kakeibo-report::{model,json_export,markdown,table}`), opt-in `--show-paths` raw working-directory scan (`kakeibo-parse::cwd`, omitted by default), explicit `"unpriced"` cost rendering (never `$0`), and `assert_cmd` + `insta` golden CLI integration suite (T08).
 - Pure v1 root-cause flag evaluation engine (`kakeibo-core::flags`: `evaluate_flags_v1`, `evaluate_flags_v1_default`, `FlagId`, `TurnRange`, `FlagEvidence`, `FlagFinding`, `FlagsConfig`, `ModelCatalog`) covering `cold-resume`, `near-full-context`, `tool-output-bloat`, `cache-miss-storm`, and `heavy-overhead` with `u128` threshold evaluation, deterministic impact ranking, and provenance-validated `data/flags.toml` and `data/models.toml` configuration tables (T07).
 - Plain-words single-sentence and provenance-labelled evidence text renderer (`kakeibo-report::flags`: `render_flag_sentence`, `render_flag_evidence`, `render_flag_finding`, `render_flags_text`) with neutral client-side wording and `insta` text goldens (T07).
 - Deterministic synthetic fixture scenarios for `claude-code/{resume-cold,near-full-context,cache-miss-storm,heavy-overhead}` in `scripts/gen-fixtures/generate.py` alongside `tool-bloat` and `basic` silence tests (T07).
