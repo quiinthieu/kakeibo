@@ -45,7 +45,7 @@ pub enum Commands {
 /// Arguments for `sessions`.
 #[derive(clap::Args, Debug, Default)]
 pub struct SessionsArgs {
-    /// Filter by source coding agent (`claude-code` or `codex`).
+    /// Filter by source coding agent (`claude-code`, `codex`, `gemini-cli`, or `opencode`).
     #[arg(long)]
     pub agent: Option<AgentId>,
 
@@ -148,7 +148,7 @@ pub enum PricingCommand {
 /// Arguments for `pricing check`.
 #[derive(clap::Args, Debug, Default)]
 pub struct PricingCheckArgs {
-    /// Filter observed models by source coding agent (`claude-code` or `codex`).
+    /// Filter observed models by source coding agent (`claude-code`, `codex`, `gemini-cli`, or `opencode`).
     #[arg(long)]
     pub agent: Option<AgentId>,
 

@@ -13,6 +13,10 @@ use serde::Deserialize;
 use crate::catalog::open_readonly;
 use crate::gemini::resolve_gemini_raw_cwd;
 use crate::line_reader::{BoundedLineReader, LineReadOutcome, DEFAULT_MAX_LINE_BYTES};
+use crate::opencode::{
+    collect_json_files_recursive, open_sqlite_readonly, sqlite_err_to_io, table_columns,
+    table_exists,
+};
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
@@ -225,5 +229,101 @@ pub fn extract_gemini_session_cwds(
     if let (Some(sid), Some(cwd)) = (sid, raw_cwd) {
         out.insert(sid, cwd);
     }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+struct MinimalOpencodeSessionCwd {
+    id: Option<String>,
+    directory: Option<String>,
+}
+
+/// Reads `<opencode_root>/opencode.db` and legacy `<opencode_root>/storage/session/**/*.json`
+/// strictly read-only to map `session_id -> raw_cwd` for opt-in `export --show-paths`.
+///
+/// Entries from `opencode.db` take precedence over duplicate `session_id`s in `storage/`.
+pub fn extract_opencode_session_cwds(opencode_root: &Path) -> io::Result<BTreeMap<String, String>> {
+    if !opencode_root.is_dir() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut out = BTreeMap::new();
+
+    let storage_session_dir = opencode_root.join("storage").join("session");
+    if storage_session_dir.is_dir() {
+        let mut session_files = Vec::new();
+        collect_json_files_recursive(&storage_session_dir, &mut session_files)?;
+        session_files.sort();
+
+        for ses_file in session_files {
+            let Ok(file) = open_readonly(&ses_file) else {
+                continue;
+            };
+            let mut raw = String::new();
+            if file
+                .take(16 * 1024 * 1024)
+                .read_to_string(&mut raw)
+                .is_err()
+            {
+                continue;
+            }
+            let Ok(parsed) = serde_json::from_str::<MinimalOpencodeSessionCwd>(&raw) else {
+                continue;
+            };
+            let sid = parsed.id.filter(|s| !s.trim().is_empty()).or_else(|| {
+                ses_file
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            });
+            let dir = parsed
+                .directory
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if let (Some(sid), Some(cwd)) = (sid, dir) {
+                out.insert(sid, cwd);
+            }
+        }
+    }
+
+    let db_path = opencode_root.join("opencode.db");
+    if db_path.is_file() {
+        let conn = open_sqlite_readonly(&db_path).map_err(sqlite_err_to_io)?;
+        if table_exists(&conn, "session").map_err(sqlite_err_to_io)? {
+            let cols = table_columns(&conn, "session").map_err(sqlite_err_to_io)?;
+            let dir_expr = if cols.contains("directory") {
+                "directory"
+            } else {
+                "NULL"
+            };
+            let data_expr = if cols.contains("data") {
+                "data"
+            } else {
+                "NULL"
+            };
+            let sql = format!("SELECT id, {dir_expr}, {data_expr} FROM session ORDER BY id ASC");
+            let mut stmt = conn.prepare(&sql).map_err(sqlite_err_to_io)?;
+            let mut rows = stmt.query([]).map_err(sqlite_err_to_io)?;
+            while let Some(row) = rows.next().map_err(sqlite_err_to_io)? {
+                let id: String = row.get(0).map_err(sqlite_err_to_io)?;
+                let mut dir: Option<String> = row.get(1).ok().flatten();
+                let raw_data: Option<String> = row.get(2).ok().flatten();
+                if dir.is_none() {
+                    if let Some(data_str) = raw_data {
+                        if let Ok(parsed) =
+                            serde_json::from_str::<MinimalOpencodeSessionCwd>(&data_str)
+                        {
+                            dir = parsed.directory;
+                        }
+                    }
+                }
+                if let Some(cwd) = dir.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+                    out.insert(id, cwd);
+                }
+            }
+        }
+    }
+
     Ok(out)
 }

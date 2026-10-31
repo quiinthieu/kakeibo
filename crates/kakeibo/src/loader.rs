@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
+use std::path::Path;
 
 use kakeibo_core::attrib::attribute_session_with_subagents;
 use kakeibo_core::flags::{evaluate_flags_v1, FlagsConfig, ModelCatalog};
@@ -10,8 +11,10 @@ use kakeibo_core::pricing::PricingCatalog;
 use kakeibo_core::{AgentId, Confidence, Timestamp, TurnRecord};
 use kakeibo_parse::hash::hash_cwd;
 use kakeibo_parse::{
-    extract_claude_session_cwds, extract_codex_session_cwds, parse_claude_file,
-    parse_claude_file_with_options, parse_codex_file, ClaudeParseOptions, PathCatalog,
+    extract_claude_session_cwds, extract_codex_session_cwds, extract_gemini_session_cwds,
+    extract_opencode_session_cwds, parse_claude_file, parse_claude_file_with_options,
+    parse_codex_file, parse_gemini_file_with_options, parse_opencode_root, ClaudeParseOptions,
+    GeminiParseOptions, PathCatalog,
 };
 use kakeibo_report::{
     sort_session_reports, DoctorReport, DoctorSourceSummary, ObservedModelPriceStatus,
@@ -164,6 +167,85 @@ fn discover_raw_sessions(
                     .entry((AgentId::Codex, sid))
                     .or_default()
                     .extend(turns);
+            }
+        }
+    }
+
+    if agent_filter.is_none_or(|a| a == AgentId::GeminiCli) {
+        let slug_registry = catalog.load_gemini_slug_registry()?;
+        let top_opts = GeminiParseOptions {
+            parent_session_id: None,
+            slug_registry: Some(slug_registry.clone()),
+            max_line_bytes: None,
+        };
+        for log in catalog.discover_gemini_top_level()? {
+            let parsed = parse_gemini_file_with_options(&log.path, &top_opts)?;
+            for tr in parsed.records {
+                primary_turns
+                    .entry((AgentId::GeminiCli, tr.session_id.clone()))
+                    .or_default()
+                    .push(tr);
+            }
+            if capture_raw_paths {
+                for (sid, cwd) in extract_gemini_session_cwds(&log.path, &slug_registry)? {
+                    raw_cwds.insert((AgentId::GeminiCli, sid), cwd);
+                }
+            }
+        }
+
+        for sub in catalog.discover_gemini_subagents()? {
+            let opts = GeminiParseOptions {
+                parent_session_id: Some(sub.parent_session_id.clone()),
+                slug_registry: Some(slug_registry.clone()),
+                max_line_bytes: None,
+            };
+            let parsed = parse_gemini_file_with_options(&sub.path, &opts)?;
+            for tr in parsed.records {
+                subagents_by_parent
+                    .entry((AgentId::GeminiCli, sub.parent_session_id.clone()))
+                    .or_default()
+                    .entry(tr.session_id.clone())
+                    .or_default()
+                    .push(tr);
+            }
+        }
+    }
+
+    if agent_filter.is_none_or(|a| a == AgentId::Opencode) {
+        if let Some(root) = catalog.opencode_root().filter(|p| p.is_dir()) {
+            let parsed = parse_opencode_root(&root)?;
+            let parent_map: BTreeMap<String, Option<String>> = parsed
+                .sessions
+                .iter()
+                .filter(|b| !b.records.is_empty())
+                .map(|b| (b.session_id.clone(), b.parent_session_id.clone()))
+                .collect();
+
+            for batch in parsed.sessions {
+                if batch.records.is_empty() {
+                    continue;
+                }
+                if let Some(root_parent) =
+                    resolve_opencode_root_parent(&batch.session_id, &parent_map)
+                {
+                    subagents_by_parent
+                        .entry((AgentId::Opencode, root_parent))
+                        .or_default()
+                        .entry(batch.session_id)
+                        .or_default()
+                        .extend(batch.records);
+                } else {
+                    primary_turns
+                        .entry((AgentId::Opencode, batch.session_id))
+                        .or_default()
+                        .extend(batch.records);
+                }
+            }
+
+            if capture_raw_paths {
+                for (sid, cwd) in extract_opencode_session_cwds(&root)? {
+                    raw_cwds.insert((AgentId::Opencode, sid), cwd);
+                }
             }
         }
     }
@@ -384,9 +466,49 @@ pub fn select_session<'a>(
     }
 }
 
+fn resolve_opencode_root_parent(
+    session_id: &str,
+    parent_map: &BTreeMap<String, Option<String>>,
+) -> Option<String> {
+    let mut current = parent_map.get(session_id)?.as_deref()?;
+    if current == session_id || !parent_map.contains_key(current) {
+        return None;
+    }
+    let mut visited = BTreeSet::new();
+    visited.insert(session_id);
+    for _ in 0..16 {
+        if !visited.insert(current) {
+            return None;
+        }
+        match parent_map.get(current).and_then(Option::as_deref) {
+            Some(next) if next != current && parent_map.contains_key(next) => {
+                current = next;
+            }
+            _ => return Some(current.to_string()),
+        }
+    }
+    Some(current.to_string())
+}
+
+fn count_json_files_recursive(dir: &Path) -> io::Result<usize> {
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0_usize;
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            count += count_json_files_recursive(&path)?;
+        } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
 /// Runs read-only discovery and diagnostic inspection for `kakeibo doctor` (`PLAN.md` §6.4).
 pub fn run_doctor(catalog: &PathCatalog) -> io::Result<DoctorReport> {
-    let mut sources = Vec::with_capacity(2);
+    let mut sources = Vec::with_capacity(4);
 
     // 1. Claude Code
     let claude_root_exists = catalog.claude_root().is_some_and(|p| p.is_dir());
@@ -475,6 +597,117 @@ pub fn run_doctor(catalog: &PathCatalog) -> io::Result<DoctorReport> {
         ignored_records: codex_ignored,
         unknown_record_types: codex_unknown,
         parse_issues: codex_issues,
+    });
+
+    // 3. Gemini CLI
+    let gemini_root_exists = catalog.gemini_root().is_some_and(|p| p.is_dir());
+    let gemini_slug_registry = catalog.load_gemini_slug_registry()?;
+    let gemini_top = catalog.discover_gemini_top_level()?;
+    let gemini_subs = catalog.discover_gemini_subagents()?;
+    let mut gemini_sessions = BTreeSet::new();
+    let mut gemini_turns = 0_usize;
+    let mut gemini_versions = BTreeSet::new();
+    let mut gemini_ignored = 0_u64;
+    let mut gemini_unknown: BTreeMap<String, u64> = BTreeMap::new();
+    let mut gemini_issues = 0_usize;
+
+    let gemini_top_opts = GeminiParseOptions {
+        parent_session_id: None,
+        slug_registry: Some(gemini_slug_registry.clone()),
+        max_line_bytes: None,
+    };
+    for log in &gemini_top {
+        let parsed = parse_gemini_file_with_options(&log.path, &gemini_top_opts)?;
+        gemini_turns += parsed.records.len();
+        for tr in &parsed.records {
+            gemini_sessions.insert(tr.session_id.clone());
+        }
+        gemini_versions.extend(parsed.diagnostics.cli_versions);
+        gemini_ignored = gemini_ignored.saturating_add(parsed.diagnostics.ignored_records);
+        gemini_issues += parsed.diagnostics.issues.len();
+        for (k, v) in parsed.diagnostics.unknown_record_types {
+            *gemini_unknown.entry(k).or_insert(0) += v;
+        }
+    }
+    for sub in &gemini_subs {
+        let opts = GeminiParseOptions {
+            parent_session_id: Some(sub.parent_session_id.clone()),
+            slug_registry: Some(gemini_slug_registry.clone()),
+            max_line_bytes: None,
+        };
+        let parsed = parse_gemini_file_with_options(&sub.path, &opts)?;
+        gemini_turns += parsed.records.len();
+        gemini_versions.extend(parsed.diagnostics.cli_versions);
+        gemini_ignored = gemini_ignored.saturating_add(parsed.diagnostics.ignored_records);
+        gemini_issues += parsed.diagnostics.issues.len();
+        for (k, v) in parsed.diagnostics.unknown_record_types {
+            *gemini_unknown.entry(k).or_insert(0) += v;
+        }
+    }
+
+    sources.push(DoctorSourceSummary {
+        agent: AgentId::GeminiCli,
+        root_exists: gemini_root_exists,
+        log_files: gemini_top.len(),
+        subagent_files: gemini_subs.len(),
+        sessions: gemini_sessions.len(),
+        turns: gemini_turns,
+        cli_versions: gemini_versions.into_iter().collect(),
+        ignored_records: gemini_ignored,
+        unknown_record_types: gemini_unknown,
+        parse_issues: gemini_issues,
+    });
+
+    // 4. OpenCode
+    let opencode_root = catalog.opencode_root();
+    let opencode_root_exists = opencode_root.as_ref().is_some_and(|p| p.is_dir());
+    let mut opencode_log_files = 0_usize;
+    let mut opencode_subagent_files = 0_usize;
+    let mut opencode_sessions = 0_usize;
+    let mut opencode_turns = 0_usize;
+    let mut opencode_versions = Vec::new();
+    let mut opencode_ignored = 0_u64;
+    let mut opencode_unknown: BTreeMap<String, u64> = BTreeMap::new();
+    let mut opencode_issues = 0_usize;
+
+    if let Some(root) = opencode_root.filter(|p| p.is_dir()) {
+        opencode_log_files = usize::from(root.join("opencode.db").is_file())
+            + count_json_files_recursive(&root.join("storage").join("session"))?;
+        let parsed = parse_opencode_root(&root)?;
+        let parent_map: BTreeMap<String, Option<String>> = parsed
+            .sessions
+            .iter()
+            .filter(|b| !b.records.is_empty())
+            .map(|b| (b.session_id.clone(), b.parent_session_id.clone()))
+            .collect();
+        for batch in &parsed.sessions {
+            opencode_turns += batch.records.len();
+            if batch.records.is_empty() {
+                continue;
+            }
+            if resolve_opencode_root_parent(&batch.session_id, &parent_map).is_some() {
+                opencode_subagent_files += 1;
+            } else {
+                opencode_sessions += 1;
+            }
+        }
+        opencode_versions = parsed.diagnostics.cli_versions.into_iter().collect();
+        opencode_ignored = parsed.diagnostics.ignored_records;
+        opencode_unknown = parsed.diagnostics.unknown_record_types;
+        opencode_issues = parsed.diagnostics.issues.len();
+    }
+
+    sources.push(DoctorSourceSummary {
+        agent: AgentId::Opencode,
+        root_exists: opencode_root_exists,
+        log_files: opencode_log_files,
+        subagent_files: opencode_subagent_files,
+        sessions: opencode_sessions,
+        turns: opencode_turns,
+        cli_versions: opencode_versions,
+        ignored_records: opencode_ignored,
+        unknown_record_types: opencode_unknown,
+        parse_issues: opencode_issues,
     });
 
     Ok(DoctorReport { sources })
