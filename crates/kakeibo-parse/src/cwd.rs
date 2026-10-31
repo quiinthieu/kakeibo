@@ -12,12 +12,11 @@ use serde::Deserialize;
 
 use crate::aider::{parse_aider_analytics_file, parse_aider_history_file};
 use crate::catalog::open_readonly;
+use crate::cursor::extract_cursor_cwds_from_vscdb;
 use crate::gemini::resolve_gemini_raw_cwd;
 use crate::line_reader::{BoundedLineReader, LineReadOutcome, DEFAULT_MAX_LINE_BYTES};
-use crate::opencode::{
-    collect_json_files_recursive, open_sqlite_readonly, sqlite_err_to_io, table_columns,
-    table_exists,
-};
+use crate::opencode::collect_json_files_recursive;
+use crate::sqlite::{open_sqlite_readonly, sqlite_err_to_io, table_columns, table_exists};
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
@@ -353,4 +352,10 @@ pub fn extract_aider_session_cwds(path: &Path) -> io::Result<BTreeMap<String, St
         out.insert(batch.session_id, parent_cwd.clone());
     }
     Ok(out)
+}
+
+/// Reads `composerData:*` entries from a Cursor `state.vscdb` database strictly
+/// read-only to map `session_id -> raw_cwd` exclusively for opt-in `export --show-paths`.
+pub fn extract_cursor_session_cwds(db_path: &Path) -> io::Result<BTreeMap<String, String>> {
+    extract_cursor_cwds_from_vscdb(db_path)
 }

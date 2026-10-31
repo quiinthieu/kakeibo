@@ -38,6 +38,10 @@ pub struct PathCatalog {
     aider_chat_history_file: Option<PathBuf>,
     aider_analytics_log: Option<PathBuf>,
     current_dir: Option<PathBuf>,
+    xdg_config_home: Option<PathBuf>,
+    appdata_dir: Option<PathBuf>,
+    cursor_state_db: Option<PathBuf>,
+    cursor_global_storage_dir: Option<PathBuf>,
 }
 
 fn non_empty_env_path(key: &str) -> Option<PathBuf> {
@@ -208,6 +212,10 @@ impl PathCatalog {
             aider_chat_history_file: None,
             aider_analytics_log: None,
             current_dir: None,
+            xdg_config_home: None,
+            appdata_dir: None,
+            cursor_state_db: None,
+            cursor_global_storage_dir: None,
         }
     }
 
@@ -261,6 +269,30 @@ impl PathCatalog {
         self
     }
 
+    /// Overrides `XDG_CONFIG_HOME` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_xdg_config_home(mut self, xdg_config_home: Option<PathBuf>) -> Self {
+        self.xdg_config_home = xdg_config_home;
+        self
+    }
+
+    /// Overrides `CURSOR_STATE_DB` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_cursor_state_db(mut self, cursor_state_db: Option<PathBuf>) -> Self {
+        self.cursor_state_db = cursor_state_db;
+        self
+    }
+
+    /// Overrides `CURSOR_GLOBAL_STORAGE_DIR` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_cursor_global_storage_dir(
+        mut self,
+        cursor_global_storage_dir: Option<PathBuf>,
+    ) -> Self {
+        self.cursor_global_storage_dir = cursor_global_storage_dir;
+        self
+    }
+
     /// Creates a [`PathCatalog`] populated from standard process environment variables.
     #[must_use]
     pub fn from_env() -> Self {
@@ -275,6 +307,10 @@ impl PathCatalog {
         let aider_chat_history_file = non_empty_env_path("AIDER_CHAT_HISTORY_FILE");
         let aider_analytics_log = non_empty_env_path("AIDER_ANALYTICS_LOG");
         let current_dir = env::current_dir().ok();
+        let xdg_config_home = non_empty_env_path("XDG_CONFIG_HOME");
+        let appdata_dir = non_empty_env_path("APPDATA");
+        let cursor_state_db = non_empty_env_path("CURSOR_STATE_DB");
+        let cursor_global_storage_dir = non_empty_env_path("CURSOR_GLOBAL_STORAGE_DIR");
         Self {
             home_dir,
             claude_config_dir,
@@ -286,6 +322,10 @@ impl PathCatalog {
             aider_chat_history_file,
             aider_analytics_log,
             current_dir,
+            xdg_config_home,
+            appdata_dir,
+            cursor_state_db,
+            cursor_global_storage_dir,
         }
     }
 
@@ -648,6 +688,77 @@ impl PathCatalog {
         Ok(logs)
     }
 
+    /// Returns ordered candidate paths for Cursor's `state.vscdb` across explicit overrides
+    /// (`CURSOR_STATE_DB`, `CURSOR_GLOBAL_STORAGE_DIR`) and macOS, Linux, and Windows
+    /// `globalStorage` layouts.
+    #[must_use]
+    pub fn cursor_candidate_state_dbs(&self) -> Vec<PathBuf> {
+        if let Some(explicit_db) = self
+            .cursor_state_db
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            return vec![explicit_db.clone()];
+        }
+        if let Some(storage_dir) = self
+            .cursor_global_storage_dir
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            return vec![storage_dir.join("state.vscdb")];
+        }
+
+        let mut candidates = Vec::with_capacity(4);
+        if let Some(home) = &self.home_dir {
+            candidates.push(
+                home.join("Library/Application Support/Cursor/User/globalStorage/state.vscdb"),
+            );
+            candidates.push(home.join(".config/Cursor/User/globalStorage/state.vscdb"));
+        }
+        if let Some(xdg_cfg) = self
+            .xdg_config_home
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            candidates.push(xdg_cfg.join("Cursor/User/globalStorage/state.vscdb"));
+        }
+        if let Some(appdata) = self
+            .appdata_dir
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            candidates.push(appdata.join("Cursor/User/globalStorage/state.vscdb"));
+        }
+        candidates
+    }
+
+    /// Returns `true` when any Cursor `globalStorage` directory or `state.vscdb` file exists.
+    #[must_use]
+    pub fn cursor_root_exists(&self) -> bool {
+        self.cursor_candidate_state_dbs()
+            .iter()
+            .any(|db| db.is_file() || db.parent().is_some_and(Path::is_dir))
+    }
+
+    /// Discovers existing Cursor `state.vscdb` databases (`PLAN.md` §5, §10 T11).
+    pub fn discover_cursor_state_dbs(&self) -> io::Result<Vec<DiscoveredLog>> {
+        let mut seen = BTreeSet::new();
+        let mut logs = Vec::new();
+        for candidate in self.cursor_candidate_state_dbs() {
+            if candidate.is_file() {
+                let key = fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+                if seen.insert(key) {
+                    logs.push(DiscoveredLog {
+                        agent: AgentId::Cursor,
+                        path: candidate,
+                    });
+                }
+            }
+        }
+        logs.sort();
+        Ok(logs)
+    }
+
     fn enclosing_repo_ancestors(&self) -> Vec<PathBuf> {
         let Some(start) = &self.current_dir else {
             return Vec::new();
@@ -658,8 +769,12 @@ impl PathCatalog {
             .map(|h| fs::canonicalize(h).unwrap_or_else(|_| h.clone()));
 
         let mut ancestors = Vec::new();
+        let mut found_git = false;
         let mut cur_opt = Some(start.as_path());
         while let Some(cur) = cur_opt {
+            if cur.parent().is_none() {
+                break;
+            }
             if let Some(ref hc) = home_canon {
                 let cur_canon = fs::canonicalize(cur).unwrap_or_else(|_| cur.to_path_buf());
                 if &cur_canon == hc {
@@ -668,9 +783,13 @@ impl PathCatalog {
             }
             ancestors.push(cur.to_path_buf());
             if cur.join(".git").exists() {
+                found_git = true;
                 break;
             }
             cur_opt = cur.parent();
+        }
+        if !found_git {
+            ancestors.truncate(1);
         }
         ancestors
     }

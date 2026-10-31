@@ -9,9 +9,19 @@ use kakeibo_core::{product, Category, Confidence};
 use crate::flags::{format_tokens, render_flag_evidence, render_flag_sentence};
 use crate::model::{format_currency_amount, format_share_pct, share_basis_points, SessionReport};
 
+const NOT_RECORDED: &str = "not recorded";
+
+const fn confidence_display(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::NotRecorded => NOT_RECORDED,
+        other => other.as_str(),
+    }
+}
+
 fn provenance_label(confidence: Confidence, method: Option<&str>) -> String {
     match (confidence, method) {
         (Confidence::Estimated, Some(m)) => format!("estimated: {m}"),
+        (Confidence::NotRecorded, _) => NOT_RECORDED.to_string(),
         (other, _) => other.as_str().to_string(),
     }
 }
@@ -57,25 +67,31 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
             report.ended_at,
             report.turn_count()
         );
+        let unrecorded = report.all_turns_not_recorded();
         let _ = writeln!(out, "- **Models:** {models_label}");
         let _ = writeln!(out, "- **Project:** `{}`", report.project_label(show_paths));
-        let _ = writeln!(
-            out,
-            "- **Totals:** {} prompt ({} fresh / {} write / {} read) + {} output = {} tokens ({})",
-            format_tokens(tot.prompt_tokens()),
-            format_tokens(tot.fresh_in),
-            format_tokens(tot.cache_write),
-            format_tokens(tot.cache_read),
-            format_tokens(tot.output),
-            format_tokens(total_tokens),
-            report.attribution.totals_confidence,
-        );
-        let _ = writeln!(
-            out,
-            "- **Fixed Overhead:** ~{} tokens (estimated: `{}`)",
-            format_tokens(report.attribution.fixed_overhead_tokens),
-            report.attribution.estimation_method,
-        );
+        if unrecorded {
+            let _ = writeln!(out, "- **Totals:** {NOT_RECORDED}");
+            let _ = writeln!(out, "- **Fixed Overhead:** {NOT_RECORDED}");
+        } else {
+            let _ = writeln!(
+                out,
+                "- **Totals:** {} prompt ({} fresh / {} write / {} read) + {} output = {} tokens ({})",
+                format_tokens(tot.prompt_tokens()),
+                format_tokens(tot.fresh_in),
+                format_tokens(tot.cache_write),
+                format_tokens(tot.cache_read),
+                format_tokens(tot.output),
+                format_tokens(total_tokens),
+                confidence_display(report.attribution.totals_confidence),
+            );
+            let _ = writeln!(
+                out,
+                "- **Fixed Overhead:** ~{} tokens (estimated: `{}`)",
+                format_tokens(report.attribution.fixed_overhead_tokens),
+                report.attribution.estimation_method,
+            );
+        }
         let _ = writeln!(out, "- **Cost:** {}\n", report.cost.display_label());
 
         out.push_str("### Category Breakdown\n\n");
@@ -114,21 +130,28 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
             );
             out.push_str("|---|---:|---:|---:|---:|---:|---:|---|\n");
             for cat in Category::ALL {
-                let split = report.attribution.categories.get(cat);
-                let cat_total = split.total_tokens();
-                let bps = share_basis_points(cat_total, total_tokens);
-                let _ = writeln!(
-                    out,
-                    "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
-                    cat,
-                    format_tokens(cat_total),
-                    format_share_pct(bps),
-                    format_tokens(split.fresh_in),
-                    format_tokens(split.cache_write),
-                    format_tokens(split.cache_read),
-                    format_tokens(split.output),
-                    cat_prov,
-                );
+                if unrecorded {
+                    let _ = writeln!(
+                        out,
+                        "| `{cat}` | {NOT_RECORDED} | - | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} |"
+                    );
+                } else {
+                    let split = report.attribution.categories.get(cat);
+                    let cat_total = split.total_tokens();
+                    let bps = share_basis_points(cat_total, total_tokens);
+                    let _ = writeln!(
+                        out,
+                        "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
+                        cat,
+                        format_tokens(cat_total),
+                        format_share_pct(bps),
+                        format_tokens(split.fresh_in),
+                        format_tokens(split.cache_write),
+                        format_tokens(split.cache_read),
+                        format_tokens(split.output),
+                        cat_prov,
+                    );
+                }
             }
         }
 
@@ -160,6 +183,20 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
             );
             out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|\n");
             for tool in &report.tools {
+                let (init_cell, carried_cell, life_cell) =
+                    if unrecorded || tool.confidence == Confidence::NotRecorded {
+                        (
+                            NOT_RECORDED.to_string(),
+                            NOT_RECORDED.to_string(),
+                            NOT_RECORDED.to_string(),
+                        )
+                    } else {
+                        (
+                            format_tokens(tool.initial_tokens),
+                            format_tokens(tool.carried_tokens),
+                            format_tokens(tool.lifetime_tokens),
+                        )
+                    };
                 let _ = writeln!(
                     out,
                     "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
@@ -168,9 +205,9 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
                     tool.results,
                     tool.errors,
                     format_tokens(tool.bytes),
-                    format_tokens(tool.initial_tokens),
-                    format_tokens(tool.carried_tokens),
-                    format_tokens(tool.lifetime_tokens),
+                    init_cell,
+                    carried_cell,
+                    life_cell,
                 );
             }
         }
@@ -214,20 +251,28 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
                         || "unpriced".to_string(),
                         |tc| format_currency_amount(&tc.currency, tc.total_cost),
                     );
-                let _ = writeln!(
-                    out,
-                    "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} |",
-                    tr.turn,
-                    tr.ts,
-                    model_str,
-                    format_tokens(ta.measured.prompt_tokens()),
-                    format_tokens(ta.measured.fresh_in),
-                    format_tokens(ta.measured.cache_write),
-                    format_tokens(ta.measured.cache_read),
-                    format_tokens(ta.measured.output),
-                    turn_cost_cell,
-                    format_tokens(ta.new_unattributed_prompt_tokens),
-                );
+                if ta.measured_confidence == Confidence::NotRecorded {
+                    let _ = writeln!(
+                        out,
+                        "| {} | `{}` | `{}` | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {} | {NOT_RECORDED} |",
+                        tr.turn, tr.ts, model_str, turn_cost_cell
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} |",
+                        tr.turn,
+                        tr.ts,
+                        model_str,
+                        format_tokens(ta.measured.prompt_tokens()),
+                        format_tokens(ta.measured.fresh_in),
+                        format_tokens(ta.measured.cache_write),
+                        format_tokens(ta.measured.cache_read),
+                        format_tokens(ta.measured.output),
+                        turn_cost_cell,
+                        format_tokens(ta.new_unattributed_prompt_tokens),
+                    );
+                }
             }
         } else {
             out.push_str(
@@ -236,19 +281,27 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
             out.push_str("|---:|---|---|---:|---:|---:|---:|---:|---:|\n");
             for (tr, ta) in report.turns.iter().zip(&report.attribution.turns) {
                 let model_str = tr.model.as_deref().unwrap_or("unknown");
-                let _ = writeln!(
-                    out,
-                    "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} |",
-                    tr.turn,
-                    tr.ts,
-                    model_str,
-                    format_tokens(ta.measured.prompt_tokens()),
-                    format_tokens(ta.measured.fresh_in),
-                    format_tokens(ta.measured.cache_write),
-                    format_tokens(ta.measured.cache_read),
-                    format_tokens(ta.measured.output),
-                    format_tokens(ta.new_unattributed_prompt_tokens),
-                );
+                if ta.measured_confidence == Confidence::NotRecorded {
+                    let _ = writeln!(
+                        out,
+                        "| {} | `{}` | `{}` | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} | {NOT_RECORDED} |",
+                        tr.turn, tr.ts, model_str
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} |",
+                        tr.turn,
+                        tr.ts,
+                        model_str,
+                        format_tokens(ta.measured.prompt_tokens()),
+                        format_tokens(ta.measured.fresh_in),
+                        format_tokens(ta.measured.cache_write),
+                        format_tokens(ta.measured.cache_read),
+                        format_tokens(ta.measured.output),
+                        format_tokens(ta.new_unattributed_prompt_tokens),
+                    );
+                }
             }
         }
     }
