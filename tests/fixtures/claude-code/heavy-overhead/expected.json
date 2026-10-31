@@ -1,0 +1,93 @@
+{
+  "agent": "claude-code",
+  "log_files": [
+    "projects/-synthetic-workspace-overhead/session-heavy-overhead-0001.jsonl"
+  ],
+  "scenario": "heavy-overhead",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "claude-sonnet-4-5",
+      "session_id": "0c4292e2-21dc-4866-bed0-d8c60dc7510d",
+      "totals": {
+        "cache_read": 48400,
+        "cache_write": 48416,
+        "fresh_in": 54,
+        "output": 80,
+        "prompt_tokens": 96870,
+        "reasoning": 0,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 96,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 48400,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T13:00:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 48376,
+            "confidence": "measured",
+            "fresh_in": 24,
+            "output": 40,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 120,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 48470,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T13:00:12Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 48400,
+            "cache_write": 40,
+            "confidence": "measured",
+            "fresh_in": 30,
+            "output": 40,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

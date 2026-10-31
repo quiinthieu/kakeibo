@@ -1,0 +1,159 @@
+{
+  "agent": "claude-code",
+  "log_files": [
+    "projects/-synthetic-workspace-resume/session-resume-cold-0001.jsonl"
+  ],
+  "scenario": "resume-cold",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 1,
+      "model": "claude-sonnet-4-5",
+      "session_id": "10f2c5a4-01ed-442a-9efa-10cd8ee92088",
+      "totals": {
+        "cache_read": 134180,
+        "cache_write": 244110,
+        "fresh_in": 180,
+        "output": 175,
+        "prompt_tokens": 378470,
+        "reasoning": 0,
+        "turns": 4
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 120,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 12030,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:10:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 12000,
+            "confidence": "measured",
+            "fresh_in": 30,
+            "output": 40,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 440000,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 200,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 122070,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:10:14Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 12030,
+            "cache_write": 110000,
+            "confidence": "measured",
+            "fresh_in": 40,
+            "output": 50,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 120,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 180,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": true,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 122150,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:55:14Z",
+          "turn": 3,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 122110,
+            "confidence": "measured",
+            "fresh_in": 40,
+            "output": 45,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 100,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 122220,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:55:24Z",
+          "turn": 4,
+          "usage": {
+            "cache_read": 122150,
+            "cache_write": 0,
+            "confidence": "measured",
+            "fresh_in": 70,
+            "output": 40,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

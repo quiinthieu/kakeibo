@@ -1824,6 +1824,551 @@ def gen_claude_tool_bloat(rng: SplitMix64, seed: int) -> dict[str, bytes]:
     }
 
 
+def _make_claude_text_helpers(
+    rng: SplitMix64,
+    records: list[dict[str, Any]],
+    *,
+    cwd: str,
+    git_branch: str,
+    session_id: str,
+    version: str,
+):
+    def push_user_text(
+        parent_uuid: str | None, ts: str, byte_len: int
+    ) -> tuple[str, str]:
+        u_uuid = rng.uuid_str()
+        u_text = rng.synth_text(byte_len)
+        records.append(
+            {
+                "cwd": cwd,
+                "gitBranch": git_branch,
+                "isMeta": False,
+                "isSidechain": False,
+                "message": {"content": u_text, "role": "user"},
+                "parentUuid": parent_uuid,
+                "sessionId": session_id,
+                "timestamp": ts,
+                "type": "user",
+                "userType": "external",
+                "uuid": u_uuid,
+                "version": version,
+            }
+        )
+        return u_uuid, u_text
+
+    def push_assistant_text(
+        parent_uuid: str,
+        ts: str,
+        model: str,
+        byte_len: int,
+        fresh_in: int,
+        cache_write: int,
+        cache_read: int,
+        output: int,
+    ) -> tuple[str, str]:
+        a_uuid = rng.uuid_str()
+        a_msg_id = rng.hex_id("msg", 16)
+        a_req_id = rng.hex_id("req", 16)
+        a_text = rng.synth_text(byte_len)
+        records.append(
+            {
+                "cwd": cwd,
+                "gitBranch": git_branch,
+                "isSidechain": False,
+                "message": {
+                    "content": [{"text": a_text, "type": "text"}],
+                    "id": a_msg_id,
+                    "model": model,
+                    "role": "assistant",
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "type": "message",
+                    "usage": {
+                        "cache_creation": {
+                            "ephemeral_1h_input_tokens": 0,
+                            "ephemeral_5m_input_tokens": cache_write,
+                        },
+                        "cache_creation_input_tokens": cache_write,
+                        "cache_read_input_tokens": cache_read,
+                        "input_tokens": fresh_in,
+                        "output_tokens": output,
+                        "service_tier": "standard",
+                    },
+                },
+                "parentUuid": parent_uuid,
+                "requestId": a_req_id,
+                "sessionId": session_id,
+                "timestamp": ts,
+                "type": "assistant",
+                "userType": "external",
+                "uuid": a_uuid,
+                "version": version,
+            }
+        )
+        return a_uuid, a_text
+
+    return push_user_text, push_assistant_text
+
+
+def gen_claude_resume_cold(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Generates `claude-code/resume-cold` (`PLAN.md` §6.3, §9, §10 T07).
+
+    4-turn session building ~122K prompt context, pausing 45 minutes (`2,700`s > `300`s TTL)
+    across an `away_summary` resume boundary, rewriting `122,110` cold `cache_write` tokens
+    on Turn 3 (`hints.resume_start == True`), then warming back up on Turn 4.
+    """
+    session_id = rng.uuid_str()
+    cwd = "/synthetic/workspace/resume"
+    log_rel = "projects/-synthetic-workspace-resume/session-resume-cold-0001.jsonl"
+    model = "claude-sonnet-4-5"
+    version = "2.1.314"
+
+    records: list[dict[str, Any]] = []
+    turns_gt: list[dict[str, Any]] = []
+    push_user_text, push_assistant_text = _make_claude_text_helpers(
+        rng,
+        records,
+        cwd=cwd,
+        git_branch="task/synth-resume",
+        session_id=session_id,
+        version=version,
+    )
+
+    # Turn 1: P(1) = 12,030 (FixedOverhead = 12,000, u1 = 30).
+    u1_uuid, u1_text = push_user_text(None, "2026-10-31T10:10:01Z", 120)
+    t1_fresh, t1_cw, t1_cr, t1_out = 30, 12000, 0, 40
+    a1_uuid, a1_text = push_assistant_text(
+        u1_uuid, "2026-10-31T10:10:04Z", model, 160, t1_fresh, t1_cw, t1_cr, t1_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t1_fresh + t1_cw + t1_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:10:04Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": t1_cr,
+                "cache_write": t1_cw,
+                "confidence": "measured",
+                "fresh_in": t1_fresh,
+                "output": t1_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Turn 2: large 440,000B (110,000 est_tokens) user prompt builds P(2) = 122,070.
+    u2_uuid, u2_text = push_user_text(a1_uuid, "2026-10-31T10:10:09Z", 440000)
+    t2_fresh, t2_cw, t2_cr, t2_out = 40, 110000, 12030, 50
+    a2_uuid, a2_text = push_assistant_text(
+        u2_uuid, "2026-10-31T10:10:14Z", model, 200, t2_fresh, t2_cw, t2_cr, t2_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u2_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t2_fresh + t2_cw + t2_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:10:14Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": t2_cr,
+                "cache_write": t2_cw,
+                "confidence": "measured",
+                "fresh_in": t2_fresh,
+                "output": t2_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Non-turn `away_summary` system boundary before resumed Turn 3 (45m idle gap = 2,700s).
+    sys_uuid = rng.uuid_str()
+    records.append(
+        {
+            "cwd": cwd,
+            "isMeta": False,
+            "isSidechain": False,
+            "parentUuid": a2_uuid,
+            "sessionId": session_id,
+            "subtype": "away_summary",
+            "timestamp": "2026-10-31T10:55:10Z",
+            "type": "system",
+            "uuid": sys_uuid,
+            "version": version,
+        }
+    )
+
+    # Turn 3: cold resume after 2,700s gap -> rewrites 122,110 tokens into cache (P(3) = 122,150).
+    u3_uuid, u3_text = push_user_text(sys_uuid, "2026-10-31T10:55:11Z", 120)
+    t3_fresh, t3_cw, t3_cr, t3_out = 40, 122110, 0, 45
+    a3_uuid, a3_text = push_assistant_text(
+        u3_uuid, "2026-10-31T10:55:14Z", model, 180, t3_fresh, t3_cw, t3_cr, t3_out
+    )
+    t3_hints = default_hints()
+    t3_hints["resume_start"] = True
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u3_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a3_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": t3_hints,
+            "model": model,
+            "prompt_tokens": t3_fresh + t3_cw + t3_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:55:14Z",
+            "turn": 3,
+            "usage": {
+                "cache_read": t3_cr,
+                "cache_write": t3_cw,
+                "confidence": "measured",
+                "fresh_in": t3_fresh,
+                "output": t3_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Turn 4: 10s later, warm cache_read = 122,150.
+    u4_uuid, u4_text = push_user_text(a3_uuid, "2026-10-31T10:55:20Z", 100)
+    t4_fresh, t4_cw, t4_cr, t4_out = 70, 0, 122150, 40
+    _, a4_text = push_assistant_text(
+        u4_uuid, "2026-10-31T10:55:24Z", model, 160, t4_fresh, t4_cw, t4_cr, t4_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u4_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a4_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t4_fresh + t4_cw + t4_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:55:24Z",
+            "turn": 4,
+            "usage": {
+                "cache_read": t4_cr,
+                "cache_write": t4_cw,
+                "confidence": "measured",
+                "fresh_in": t4_fresh,
+                "output": t4_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    expected = {
+        "agent": "claude-code",
+        "log_files": [log_rel],
+        "scenario": "resume-cold",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 1,
+                "model": model,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    return {
+        f"claude-code/resume-cold/{log_rel}": dumps_jsonl(records),
+        "claude-code/resume-cold/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_claude_near_full_context(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Generates `claude-code/near-full-context` (`PLAN.md` §6.3, §10 T07).
+
+    5-turn `claude-sonnet-4-5` (`200,000` window) session sustaining `86%..95%` of the
+    context window across 4 consecutive requests on Turns `2..=5`.
+    """
+    session_id = rng.uuid_str()
+    cwd = "/synthetic/workspace/nearfull"
+    log_rel = "projects/-synthetic-workspace-nearfull/session-near-full-0001.jsonl"
+    model = "claude-sonnet-4-5"
+    version = "2.1.314"
+
+    records: list[dict[str, Any]] = []
+    turns_gt: list[dict[str, Any]] = []
+    push_user_text, push_assistant_text = _make_claude_text_helpers(
+        rng,
+        records,
+        cwd=cwd,
+        git_branch="task/synth-nearfull",
+        session_id=session_id,
+        version=version,
+    )
+
+    turn_specs = [
+        # (u_ts, u_bytes, a_ts, a_bytes, fresh_in, cache_write, cache_read, output)
+        ("2026-10-31T11:00:01Z", 120, "2026-10-31T11:00:04Z", 160, 30, 14000, 0, 40),
+        ("2026-10-31T11:00:10Z", 632000, "2026-10-31T11:00:15Z", 200, 40, 158000, 14030, 50),
+        ("2026-10-31T11:00:20Z", 24000, "2026-10-31T11:00:25Z", 180, 50, 6000, 172070, 45),
+        ("2026-10-31T11:00:30Z", 24000, "2026-10-31T11:00:35Z", 160, 45, 6000, 178120, 40),
+        ("2026-10-31T11:00:40Z", 24000, "2026-10-31T11:00:45Z", 220, 40, 6000, 184165, 55),
+    ]
+
+    prev_uuid: str | None = None
+    for idx, (u_ts, u_bytes, a_ts, a_bytes, fresh, cw, cr, out) in enumerate(
+        turn_specs, start=1
+    ):
+        u_uuid, u_text = push_user_text(prev_uuid, u_ts, u_bytes)
+        a_uuid, a_text = push_assistant_text(
+            u_uuid, a_ts, model, a_bytes, fresh, cw, cr, out
+        )
+        prev_uuid = a_uuid
+        turns_gt.append(
+            {
+                "added_blocks": [
+                    {"bytes": len(u_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                    {"bytes": len(a_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+                ],
+                "hints": default_hints(),
+                "model": model,
+                "prompt_tokens": fresh + cw + cr,
+                "rate_limit_used_percent": None,
+                "ts": a_ts,
+                "turn": idx,
+                "usage": {
+                    "cache_read": cr,
+                    "cache_write": cw,
+                    "confidence": "measured",
+                    "fresh_in": fresh,
+                    "output": out,
+                    "reasoning": None,
+                },
+            }
+        )
+
+    expected = {
+        "agent": "claude-code",
+        "log_files": [log_rel],
+        "scenario": "near-full-context",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": model,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    return {
+        f"claude-code/near-full-context/{log_rel}": dumps_jsonl(records),
+        "claude-code/near-full-context/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_claude_cache_miss_storm(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Generates `claude-code/cache-miss-storm` (`PLAN.md` §6.3, §9, §10 T07).
+
+    5-turn session switching models (`claude-sonnet-4-5` <-> `claude-opus-4-5`) across
+    Turns `2..=4` (8s apart, well inside 5m TTL), causing 3 consecutive mid-session
+    `cache_write >> cache_read` misses (`45,480` rewritten tokens) before stabilising on Turn 5.
+    """
+    session_id = rng.uuid_str()
+    cwd = "/synthetic/workspace/storm"
+    log_rel = "projects/-synthetic-workspace-storm/session-cache-miss-storm-0001.jsonl"
+    version = "2.1.314"
+
+    records: list[dict[str, Any]] = []
+    turns_gt: list[dict[str, Any]] = []
+    push_user_text, push_assistant_text = _make_claude_text_helpers(
+        rng,
+        records,
+        cwd=cwd,
+        git_branch="task/synth-storm",
+        session_id=session_id,
+        version=version,
+    )
+
+    turn_specs = [
+        ("2026-10-31T12:00:01Z", 120, "2026-10-31T12:00:04Z", "claude-sonnet-4-5", 160, 30, 15000, 0, 40),
+        ("2026-10-31T12:00:08Z", 160, "2026-10-31T12:00:12Z", "claude-opus-4-5", 200, 40, 15070, 0, 50),
+        ("2026-10-31T12:00:16Z", 160, "2026-10-31T12:00:20Z", "claude-sonnet-4-5", 200, 40, 15160, 0, 50),
+        ("2026-10-31T12:00:24Z", 160, "2026-10-31T12:00:28Z", "claude-opus-4-5", 200, 40, 15250, 0, 50),
+        ("2026-10-31T12:00:32Z", 120, "2026-10-31T12:00:36Z", "claude-opus-4-5", 160, 30, 50, 15290, 40),
+    ]
+
+    prev_uuid: str | None = None
+    for idx, (u_ts, u_bytes, a_ts, turn_model, a_bytes, fresh, cw, cr, out) in enumerate(
+        turn_specs, start=1
+    ):
+        u_uuid, u_text = push_user_text(prev_uuid, u_ts, u_bytes)
+        a_uuid, a_text = push_assistant_text(
+            u_uuid, a_ts, turn_model, a_bytes, fresh, cw, cr, out
+        )
+        prev_uuid = a_uuid
+        turns_gt.append(
+            {
+                "added_blocks": [
+                    {"bytes": len(u_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                    {"bytes": len(a_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+                ],
+                "hints": default_hints(),
+                "model": turn_model,
+                "prompt_tokens": fresh + cw + cr,
+                "rate_limit_used_percent": None,
+                "ts": a_ts,
+                "turn": idx,
+                "usage": {
+                    "cache_read": cr,
+                    "cache_write": cw,
+                    "confidence": "measured",
+                    "fresh_in": fresh,
+                    "output": out,
+                    "reasoning": None,
+                },
+            }
+        )
+
+    expected = {
+        "agent": "claude-code",
+        "log_files": [log_rel],
+        "scenario": "cache-miss-storm",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": "claude-sonnet-4-5",
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    return {
+        f"claude-code/cache-miss-storm/{log_rel}": dumps_jsonl(records),
+        "claude-code/cache-miss-storm/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_claude_heavy_overhead(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Generates `claude-code/heavy-overhead` (`PLAN.md` §6.3, §10 T07).
+
+    2-turn session starting with `P(1) = 48,400` (`48,376` fixed overhead + `24`-token
+    first user prompt) on Turn 1, followed by a warm cache hit on Turn 2.
+    """
+    session_id = rng.uuid_str()
+    cwd = "/synthetic/workspace/overhead"
+    log_rel = "projects/-synthetic-workspace-overhead/session-heavy-overhead-0001.jsonl"
+    model = "claude-sonnet-4-5"
+    version = "2.1.314"
+
+    records: list[dict[str, Any]] = []
+    turns_gt: list[dict[str, Any]] = []
+    push_user_text, push_assistant_text = _make_claude_text_helpers(
+        rng,
+        records,
+        cwd=cwd,
+        git_branch="task/synth-overhead",
+        session_id=session_id,
+        version=version,
+    )
+
+    # Turn 1: P(1) = 48,400 (FixedOverhead = 48,376, u1 = 24).
+    u1_uuid, u1_text = push_user_text(None, "2026-10-31T13:00:01Z", 96)
+    t1_fresh, t1_cw, t1_cr, t1_out = 24, 48376, 0, 40
+    a1_uuid, a1_text = push_assistant_text(
+        u1_uuid, "2026-10-31T13:00:04Z", model, 160, t1_fresh, t1_cw, t1_cr, t1_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t1_fresh + t1_cw + t1_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T13:00:04Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": t1_cr,
+                "cache_write": t1_cw,
+                "confidence": "measured",
+                "fresh_in": t1_fresh,
+                "output": t1_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Turn 2: warm cache_read = 48,400.
+    u2_uuid, u2_text = push_user_text(a1_uuid, "2026-10-31T13:00:08Z", 120)
+    t2_fresh, t2_cw, t2_cr, t2_out = 30, 40, 48400, 40
+    _, a2_text = push_assistant_text(
+        u2_uuid, "2026-10-31T13:00:12Z", model, 160, t2_fresh, t2_cw, t2_cr, t2_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u2_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t2_fresh + t2_cw + t2_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T13:00:12Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": t2_cr,
+                "cache_write": t2_cw,
+                "confidence": "measured",
+                "fresh_in": t2_fresh,
+                "output": t2_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    expected = {
+        "agent": "claude-code",
+        "log_files": [log_rel],
+        "scenario": "heavy-overhead",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": model,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    return {
+        f"claude-code/heavy-overhead/{log_rel}": dumps_jsonl(records),
+        "claude-code/heavy-overhead/expected.json": dumps_pretty_json(expected),
+    }
+
+
 def generate_all(seed: int) -> dict[str, bytes]:
     rng = SplitMix64(seed)
     files: dict[str, bytes] = {}
@@ -1833,6 +2378,10 @@ def generate_all(seed: int) -> dict[str, bytes]:
         gen_codex_basic,
         gen_codex_dual_usage,
         gen_claude_tool_bloat,
+        gen_claude_resume_cold,
+        gen_claude_near_full_context,
+        gen_claude_cache_miss_storm,
+        gen_claude_heavy_overhead,
     ):
         # Derive an independent deterministic sub-seed per scenario so adding new
         # scenarios in later tasks never shifts existing scenario bytes!
