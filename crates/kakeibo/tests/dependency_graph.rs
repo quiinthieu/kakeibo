@@ -187,6 +187,8 @@ fn kakeibo_core_is_pure_without_io_clock_env_or_net() {
         "std::process",
         "SystemTime",
         "Instant::now",
+        "now_utc",
+        "now_local",
         concat!("std", "::", "net"),
     ];
 
