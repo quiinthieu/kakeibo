@@ -1,0 +1,103 @@
+{
+  "agent": "gemini-cli",
+  "log_files": [
+    "tmp/synth-gemini-alpha/chats/session-2026-10-31T09-00-d4403a5b.jsonl"
+  ],
+  "scenario": "rewind-patch",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 4,
+      "model": "gemini-2.5-pro",
+      "session_id": "d4403a5b-fe88-4589-92ba-cb95e5801544",
+      "totals": {
+        "cache_read": 14758,
+        "cache_write": 0,
+        "fresh_in": 2476,
+        "output": 282,
+        "prompt_tokens": 17234,
+        "reasoning": 54,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 104,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 109,
+              "kind": "assistant_thinking",
+              "tool": null
+            },
+            {
+              "bytes": 120,
+              "kind": "assistant_text",
+              "tool": null
+            },
+            {
+              "bytes": 47,
+              "kind": "tool_use",
+              "tool": "read_file"
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "gemini-2.5-pro",
+          "prompt_tokens": 8358,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T09:00:03Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 6400,
+            "cache_write": 0,
+            "confidence": "measured",
+            "fresh_in": 1958,
+            "output": 150,
+            "reasoning": 54
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 312,
+              "kind": "tool_result",
+              "tool": "read_file"
+            },
+            {
+              "bytes": 176,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "gemini-2.5-pro",
+          "prompt_tokens": 8876,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T09:00:12Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 8358,
+            "cache_write": 0,
+            "confidence": "measured",
+            "fresh_in": 518,
+            "output": 132,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

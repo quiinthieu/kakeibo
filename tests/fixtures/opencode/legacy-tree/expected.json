@@ -1,0 +1,103 @@
+{
+  "agent": "opencode",
+  "log_files": [
+    "storage/session/prj_e1433d99b12e9d88/ses_5a8f2ac9050e7160.json"
+  ],
+  "scenario": "legacy-tree",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "claude-sonnet-4-5",
+      "session_id": "ses_5a8f2ac9050e7160",
+      "totals": {
+        "cache_read": 8999,
+        "cache_write": 8940,
+        "fresh_in": 611,
+        "output": 254,
+        "prompt_tokens": 18550,
+        "reasoning": 44,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 100,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 80,
+              "kind": "assistant_thinking",
+              "tool": null
+            },
+            {
+              "bytes": 116,
+              "kind": "assistant_text",
+              "tool": null
+            },
+            {
+              "bytes": 62,
+              "kind": "tool_use",
+              "tool": "read"
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 8999,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T09:00:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 8600,
+            "confidence": "measured",
+            "fresh_in": 399,
+            "output": 136,
+            "reasoning": 44
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 296,
+              "kind": "tool_result",
+              "tool": "read"
+            },
+            {
+              "bytes": 168,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 9551,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T09:00:12Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 8999,
+            "cache_write": 340,
+            "confidence": "measured",
+            "fresh_in": 212,
+            "output": 118,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "agent": "gemini-cli",
+  "log_files": [
+    "tmp/synth-gemini-legacy/chats/session-2026-10-31T10-00-fadd8f88.json"
+  ],
+  "scenario": "legacy-json",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 1,
+      "model": "gemini-2.5-flash",
+      "session_id": "fadd8f88-cda9-4380-b84d-5728c8c189f8",
+      "totals": {
+        "cache_read": 6535,
+        "cache_write": 0,
+        "fresh_in": 2151,
+        "output": 214,
+        "prompt_tokens": 8686,
+        "reasoning": 32,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 92,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 108,
+              "kind": "assistant_text",
+              "tool": null
+            },
+            {
+              "bytes": 30,
+              "kind": "tool_use",
+              "tool": "run_shell_command"
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "gemini-2.5-flash",
+          "prompt_tokens": 4135,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:00:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 2400,
+            "cache_write": 0,
+            "confidence": "measured",
+            "fresh_in": 1735,
+            "output": 110,
+            "reasoning": 32
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 248,
+              "kind": "tool_result",
+              "tool": "run_shell_command"
+            },
+            {
+              "bytes": 144,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": true,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "gemini-2.5-flash",
+          "prompt_tokens": 4551,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:00:10Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 4135,
+            "cache_write": 0,
+            "confidence": "measured",
+            "fresh_in": 416,
+            "output": 104,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

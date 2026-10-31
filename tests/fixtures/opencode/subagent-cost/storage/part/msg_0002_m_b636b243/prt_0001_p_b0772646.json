@@ -1,0 +1,24 @@
+{
+  "callID": "call_81f1daf8789d",
+  "id": "prt_0001_p_b0772646",
+  "messageID": "msg_0002_m_b636b243",
+  "sessionID": "ses_0001_s_d270b3f6224f",
+  "state": {
+    "input": {
+      "description": "Audit SQLite flags",
+      "prompt": "alpha vessel journal window ripple vector journal Attribution syntax circuit beacon blo."
+    },
+    "metadata": {
+      "sessionId": "ses_0002_s_c25076c69481"
+    },
+    "output": "lantern harbor manifest frame sector cursor vessel epoch epoch locale compass archive filter archive tablet harbor entry relay source syntax epoch sample symbol zenith tunnel meadow f.",
+    "status": "completed",
+    "time": {
+      "end": 1793440807500,
+      "start": 1793440802500
+    },
+    "title": "Audit SQLite flags"
+  },
+  "tool": "task",
+  "type": "tool"
+}

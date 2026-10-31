@@ -1,0 +1,29 @@
+{
+  "agent": "build",
+  "cost": 0,
+  "finish": "stop",
+  "id": "msg_0003_m_5f43a787",
+  "mode": "build",
+  "modelID": "claude-sonnet-4-5",
+  "parentID": "msg_0001_m_62e0923a",
+  "path": {
+    "cwd": "/synthetic/workspace/opencode-alpha",
+    "root": "/synthetic/workspace/opencode-alpha"
+  },
+  "providerID": "anthropic",
+  "role": "assistant",
+  "sessionID": "ses_5a8f2ac9050e7160",
+  "time": {
+    "completed": 1793437212000,
+    "created": 1793437206000
+  },
+  "tokens": {
+    "cache": {
+      "read": 8999,
+      "write": 340
+    },
+    "input": 212,
+    "output": 118,
+    "reasoning": 0
+  }
+}

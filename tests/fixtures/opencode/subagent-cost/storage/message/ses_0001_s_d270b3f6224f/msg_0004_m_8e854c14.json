@@ -1,0 +1,30 @@
+{
+  "agent": "build",
+  "cost": 0.0185,
+  "finish": "stop",
+  "id": "msg_0004_m_8e854c14",
+  "mode": "build",
+  "modelID": "claude-opus-4-5",
+  "parentID": "msg_0003_m_de7d81e6",
+  "path": {
+    "cwd": "/synthetic/workspace/opencode-beta",
+    "root": "/synthetic/workspace/opencode-beta"
+  },
+  "providerID": "anthropic",
+  "role": "assistant",
+  "sessionID": "ses_0001_s_d270b3f6224f",
+  "summary": true,
+  "time": {
+    "completed": 1793440815000,
+    "created": 1793440811000
+  },
+  "tokens": {
+    "cache": {
+      "read": 2200,
+      "write": 1400
+    },
+    "input": 325,
+    "output": 108,
+    "reasoning": 0
+  }
+}

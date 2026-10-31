@@ -1,0 +1,13 @@
+{
+  "directory": "/synthetic/workspace/opencode-beta",
+  "id": "ses_0001_s_d270b3f6224f",
+  "parentID": null,
+  "projectID": "prj_cf970be8c71845af",
+  "slug": "synth-opencode-parent",
+  "time": {
+    "created": 1793440800000,
+    "updated": 1793440815000
+  },
+  "title": "archive vertex prism filter.",
+  "version": "1.2.4"
+}

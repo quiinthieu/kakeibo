@@ -1,0 +1,13 @@
+{
+  "directory": "/synthetic/workspace/opencode-alpha",
+  "id": "ses_5a8f2ac9050e7160",
+  "parentID": null,
+  "projectID": "prj_e1433d99b12e9d88",
+  "slug": "synth-opencode-alpha",
+  "time": {
+    "created": 1793437200000,
+    "updated": 1793437212000
+  },
+  "title": "pebble index pattern socket tra.",
+  "version": "1.2.4"
+}

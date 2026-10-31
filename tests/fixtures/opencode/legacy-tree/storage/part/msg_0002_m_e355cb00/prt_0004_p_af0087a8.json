@@ -1,0 +1,23 @@
+{
+  "callID": "call_8c271a002822",
+  "id": "prt_0004_p_af0087a8",
+  "messageID": "msg_0002_m_e355cb00",
+  "sessionID": "ses_5a8f2ac9050e7160",
+  "state": {
+    "input": {
+      "filePath": "/synthetic/workspace/opencode-alpha/src/main.rs"
+    },
+    "metadata": {
+      "truncated": false
+    },
+    "output": "offset digest token vertex digest index report canvas circuit block digest offset syntax router stream beacon tensor needle sample packet engine header horizon engine filter delta sample catalog ripple catalog summit pattern pebble pattern metric orbit circuit orbit compass pebble cursor parser.",
+    "status": "completed",
+    "time": {
+      "end": 1793437205000,
+      "start": 1793437204100
+    },
+    "title": "src/main.rs"
+  },
+  "tool": "read",
+  "type": "tool"
+}

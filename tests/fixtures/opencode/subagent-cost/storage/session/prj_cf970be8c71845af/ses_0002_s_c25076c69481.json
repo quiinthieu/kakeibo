@@ -1,0 +1,13 @@
+{
+  "directory": "/synthetic/workspace/opencode-beta",
+  "id": "ses_0002_s_c25076c69481",
+  "parentID": "ses_0001_s_d270b3f6224f",
+  "projectID": "prj_cf970be8c71845af",
+  "slug": "synth-opencode-child",
+  "time": {
+    "created": 1793440803000,
+    "updated": 1793440807000
+  },
+  "title": "canvas ripple lantern catal.",
+  "version": "1.2.4"
+}

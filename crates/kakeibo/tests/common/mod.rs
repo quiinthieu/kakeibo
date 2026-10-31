@@ -166,36 +166,35 @@ impl TestEnv {
         let agent_home_subdir = match agent {
             "claude-code" => self.home.join(".claude"),
             "codex" => self.home.join(".codex"),
+            "gemini-cli" => self.home.join(".gemini"),
+            "opencode" => self.xdg_data.join("opencode"),
             other => panic!("unsupported fixture agent `{other}`"),
         };
 
+        copy_scenario_tree(&scenario_dir, &scenario_dir, &agent_home_subdir);
+
         let mut staged_paths = Vec::with_capacity(expected.log_files.len());
         for rel in &expected.log_files {
-            let src = scenario_dir.join(rel);
             let dst = agent_home_subdir.join(rel);
-            if let Some(parent) = dst.parent() {
-                fs::create_dir_all(parent).expect("create staged log parent directory");
-            }
-            fs::copy(&src, &dst).unwrap_or_else(|e| {
-                panic!(
-                    "failed to stage fixture {} -> {}: {e}",
-                    src.display(),
-                    dst.display()
-                )
-            });
+            assert!(
+                dst.is_file(),
+                "expected staged log file missing after copy: {}",
+                dst.display()
+            );
             staged_paths.push(dst);
         }
 
         (staged_paths, expected)
     }
 
-    /// Recursively removes write permissions on the synthetic `HOME` tree to prove
-    /// decoders open agent logs strictly read-only (`PLAN.md` §0 #5 & §9).
+    /// Recursively removes write permissions on the synthetic `HOME` and `XDG_DATA_HOME`
+    /// trees to prove decoders open agent logs strictly read-only (`PLAN.md` §0 #5 & §9).
     pub fn make_logs_readonly(&self) -> ReadOnlyGuard {
-        set_tree_readonly_postorder(&self.home);
-        ReadOnlyGuard {
-            target: self.home.clone(),
+        let targets = vec![self.home.clone(), self.xdg_data.clone()];
+        for target in &targets {
+            set_tree_readonly_postorder(target);
         }
+        ReadOnlyGuard { targets }
     }
 
     /// Builds a `kakeibo` CLI command strictly isolated to this `TestEnv`.
@@ -210,18 +209,50 @@ impl TestEnv {
             .env("NO_COLOR", "1")
             .env("TZ", "UTC")
             .env_remove("CLAUDE_CONFIG_DIR")
-            .env_remove("CODEX_HOME");
+            .env_remove("CODEX_HOME")
+            .env_remove("GEMINI_CLI_HOME")
+            .env_remove("OPENCODE_DATA_DIR");
         cmd
     }
 }
 
+fn copy_scenario_tree(root: &Path, cur: &Path, dst_root: &Path) {
+    let entries = fs::read_dir(cur)
+        .unwrap_or_else(|e| panic!("failed to read fixture directory {}: {e}", cur.display()));
+    for entry in entries {
+        let entry = entry.expect("valid fixture dir entry");
+        let path = entry.path();
+        if path.is_dir() {
+            copy_scenario_tree(root, &path, dst_root);
+        } else {
+            let rel = path.strip_prefix(root).expect("strip scenario root");
+            if rel == Path::new("expected.json") {
+                continue;
+            }
+            let dst = dst_root.join(rel);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent).expect("create staged fixture parent directory");
+            }
+            fs::copy(&path, &dst).unwrap_or_else(|e| {
+                panic!(
+                    "failed to stage fixture {} -> {}: {e}",
+                    path.display(),
+                    dst.display()
+                )
+            });
+        }
+    }
+}
+
 pub struct ReadOnlyGuard {
-    target: PathBuf,
+    targets: Vec<PathBuf>,
 }
 
 impl Drop for ReadOnlyGuard {
     fn drop(&mut self) {
-        restore_tree_writable_preorder(&self.target);
+        for target in &self.targets {
+            restore_tree_writable_preorder(target);
+        }
     }
 }
 

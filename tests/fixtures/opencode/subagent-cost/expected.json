@@ -1,0 +1,143 @@
+{
+  "agent": "opencode",
+  "log_files": [
+    "storage/session/prj_cf970be8c71845af/ses_0001_s_d270b3f6224f.json",
+    "storage/session/prj_cf970be8c71845af/ses_0002_s_c25076c69481.json"
+  ],
+  "scenario": "subagent-cost",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "claude-opus-4-5",
+      "session_id": "ses_0001_s_d270b3f6224f",
+      "totals": {
+        "cache_read": 4000,
+        "cache_write": 7600,
+        "fresh_in": 795,
+        "output": 194,
+        "prompt_tokens": 12395,
+        "reasoning": 0,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 112,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 136,
+              "kind": "tool_use",
+              "tool": "task"
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-opus-4-5",
+          "prompt_tokens": 8470,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:00:08Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 1800,
+            "cache_write": 6200,
+            "confidence": "measured",
+            "fresh_in": 470,
+            "output": 86,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 184,
+              "kind": "tool_result",
+              "tool": "task"
+            },
+            {
+              "bytes": 152,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": true,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-opus-4-5",
+          "prompt_tokens": 3925,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:00:15Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 2200,
+            "cache_write": 1400,
+            "confidence": "measured",
+            "fresh_in": 325,
+            "output": 108,
+            "reasoning": null
+          }
+        }
+      ]
+    },
+    {
+      "ignored_records": 0,
+      "model": "claude-haiku-4-5",
+      "session_id": "ses_0002_s_c25076c69481",
+      "totals": {
+        "cache_read": 0,
+        "cache_write": 1900,
+        "fresh_in": 241,
+        "output": 94,
+        "prompt_tokens": 2141,
+        "reasoning": 0,
+        "turns": 1
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 88,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 184,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": true
+          },
+          "model": "claude-haiku-4-5",
+          "prompt_tokens": 2141,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T10:00:07Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 1900,
+            "confidence": "measured",
+            "fresh_in": 241,
+            "output": 94,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

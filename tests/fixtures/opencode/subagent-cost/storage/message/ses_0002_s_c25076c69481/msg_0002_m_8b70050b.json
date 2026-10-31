@@ -1,0 +1,29 @@
+{
+  "agent": "general",
+  "cost": 0.0125,
+  "finish": "stop",
+  "id": "msg_0002_m_8b70050b",
+  "mode": "general",
+  "modelID": "claude-haiku-4-5",
+  "parentID": "msg_0001_m_2fe47481",
+  "path": {
+    "cwd": "/synthetic/workspace/opencode-beta",
+    "root": "/synthetic/workspace/opencode-beta"
+  },
+  "providerID": "anthropic",
+  "role": "assistant",
+  "sessionID": "ses_0002_s_c25076c69481",
+  "time": {
+    "completed": 1793440807000,
+    "created": 1793440804000
+  },
+  "tokens": {
+    "cache": {
+      "read": 0,
+      "write": 1900
+    },
+    "input": 241,
+    "output": 94,
+    "reasoning": 0
+  }
+}
