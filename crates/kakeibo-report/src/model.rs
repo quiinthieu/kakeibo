@@ -1,4 +1,4 @@
-//! Shared report view-models for CLI tables, Markdown reports, and JSON exports (`PLAN.md` §6.4).
+//! Shared report view-models for CLI tables, Markdown reports, and JSON exports (`PLAN.md` §6.2, §6.4).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -6,51 +6,72 @@ use std::str::FromStr;
 
 use kakeibo_core::attrib::{SessionAttribution, TokenSplit};
 use kakeibo_core::flags::FlagFinding;
+pub use kakeibo_core::pricing::CostStatus;
+use kakeibo_core::pricing::{price_session, PricingCatalog, SessionCostAttribution};
 use kakeibo_core::{AgentId, BlockKind, Confidence, Timestamp, TurnRecord};
 use serde::{Deserialize, Serialize};
 
-/// Cost availability status before/after user pricing tables are applied (`PLAN.md` §6.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CostStatus {
-    /// No configured user price matched; never rendered as `$0`.
-    Unpriced,
-    /// Cost figure was logged directly by the coding agent (`agent_reported_cost_usd`).
-    AgentReported,
-}
-
-impl CostStatus {
-    /// Canonical `snake_case` wire label.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Unpriced => "unpriced",
-            Self::AgentReported => "agent_reported",
-        }
+/// Formats an amount in `currency` to 4 decimal places (`"$0.1234"` for `"USD"`, `"EUR 0.1234"` otherwise).
+#[must_use]
+pub fn format_currency_amount(currency: &str, amount: f64) -> String {
+    if currency.eq_ignore_ascii_case("USD") {
+        format!("${amount:.4}")
+    } else {
+        format!("{} {amount:.4}", currency.trim().to_ascii_uppercase())
     }
 }
 
 /// Session-level API-equivalent or agent-reported cost summary (`PLAN.md` §6.2).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CostSummary {
     pub status: CostStatus,
+    pub currency: Option<String>,
+    pub amount: Option<f64>,
     pub usd: Option<f64>,
 }
 
 impl CostSummary {
     /// Default unpriced summary (`"unpriced"`, `usd: None`).
-    pub const UNPRICED: Self = Self {
-        status: CostStatus::Unpriced,
-        usd: None,
-    };
+    #[must_use]
+    pub const fn unpriced() -> Self {
+        Self {
+            status: CostStatus::Unpriced,
+            currency: None,
+            amount: None,
+            usd: None,
+        }
+    }
 
-    /// Human-readable display label (`"unpriced"` or `"$X.XXXX (agent-reported)"`).
+    /// Constructs a [`CostSummary`] from a [`SessionCostAttribution`].
+    #[must_use]
+    pub fn from_attribution(attr: &SessionCostAttribution) -> Self {
+        let is_usd = attr
+            .currency
+            .as_deref()
+            .is_some_and(|c| c.eq_ignore_ascii_case("USD"));
+        let usd = if is_usd { attr.total_cost } else { None };
+        Self {
+            status: attr.status,
+            currency: attr.currency.clone(),
+            amount: attr.total_cost,
+            usd,
+        }
+    }
+
+    /// Human-readable display label (`"unpriced"`, `"$X.XXXX (API-equiv)"`, `"$X.XXXX (partial, API-equiv)"`, or `"$X.XXXX (agent-reported)"`).
     #[must_use]
     pub fn display_label(&self) -> String {
-        match (self.status, self.usd) {
+        let curr = self.currency.as_deref().unwrap_or("USD");
+        match (self.status, self.amount) {
             (CostStatus::Unpriced, _) | (_, None) => "unpriced".to_string(),
-            (CostStatus::AgentReported, Some(amount)) => {
-                format!("${amount:.4} (agent-reported)")
+            (CostStatus::Configured, Some(val)) => {
+                format!("{} (API-equiv)", format_currency_amount(curr, val))
+            }
+            (CostStatus::PartialConfigured, Some(val)) => {
+                format!("{} (partial, API-equiv)", format_currency_amount(curr, val))
+            }
+            (CostStatus::AgentReported, Some(val)) => {
+                format!("{} (agent-reported)", format_currency_amount(curr, val))
             }
         }
     }
@@ -71,7 +92,7 @@ pub struct ToolSpendSummary {
     pub estimation_method: &'static str,
 }
 
-/// Complete attributed and flagged view of a single primary coding-agent session.
+/// Complete attributed, flagged, and priced view of a single primary coding-agent session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionReport {
     pub agent: AgentId,
@@ -83,6 +104,7 @@ pub struct SessionReport {
     /// Populated exclusively when `export --show-paths` is explicitly requested.
     pub project_path: Option<String>,
     pub cost: CostSummary,
+    pub cost_attribution: SessionCostAttribution,
     pub turns: Vec<TurnRecord>,
     pub attribution: SessionAttribution,
     pub flags: Vec<FlagFinding>,
@@ -100,14 +122,27 @@ struct ToolAccumulator {
 }
 
 impl SessionReport {
-    /// Builds a [`SessionReport`] from a non-empty chronological slice of [`TurnRecord`]s,
-    /// its [`SessionAttribution`], and its ranked [`FlagFinding`]s.
+    /// Builds an unpriced/bundled [`SessionReport`] using [`PricingCatalog::bundled()`].
     #[must_use]
     pub fn build(
         turns: Vec<TurnRecord>,
         attribution: SessionAttribution,
         flags: Vec<FlagFinding>,
         project_path: Option<String>,
+    ) -> Option<Self> {
+        let bundled = PricingCatalog::bundled();
+        Self::build_with_pricing(turns, &[], attribution, flags, project_path, &bundled)
+    }
+
+    /// Builds a [`SessionReport`] priced against `pricing` across `turns` and `subagents`.
+    #[must_use]
+    pub fn build_with_pricing(
+        turns: Vec<TurnRecord>,
+        subagents: &[&[TurnRecord]],
+        attribution: SessionAttribution,
+        flags: Vec<FlagFinding>,
+        project_path: Option<String>,
+        pricing: &PricingCatalog,
     ) -> Option<Self> {
         let first = turns.first()?;
         let agent = first.agent;
@@ -117,8 +152,6 @@ impl SessionReport {
         let mut ended_at = first.ts;
         let mut model_set = BTreeSet::new();
         let mut project_hash: Option<String> = None;
-        let mut reported_cost_sum = 0.0_f64;
-        let mut saw_reported_cost = false;
 
         for tr in &turns {
             if tr.ts < started_at {
@@ -133,24 +166,10 @@ impl SessionReport {
             if tr.cwd_hash.is_some() {
                 project_hash.clone_from(&tr.cwd_hash);
             }
-            if let Some(cost_usd) = tr
-                .usage
-                .agent_reported_cost_usd
-                .filter(|v| v.is_finite() && *v >= 0.0)
-            {
-                reported_cost_sum += cost_usd;
-                saw_reported_cost = true;
-            }
         }
 
-        let cost = if saw_reported_cost {
-            CostSummary {
-                status: CostStatus::AgentReported,
-                usd: Some(reported_cost_sum),
-            }
-        } else {
-            CostSummary::UNPRICED
-        };
+        let cost_attribution = price_session(&turns, subagents, &attribution, pricing);
+        let cost = CostSummary::from_attribution(&cost_attribution);
 
         let mut tool_map: BTreeMap<String, ToolAccumulator> = BTreeMap::new();
         for blk in &attribution.carried_blocks {
@@ -209,11 +228,18 @@ impl SessionReport {
             project_hash,
             project_path,
             cost,
+            cost_attribution,
             turns,
             attribution,
             flags,
             tools,
         })
+    }
+
+    /// Returns `true` when at least one primary turn in this session matched a configured price.
+    #[must_use]
+    pub fn has_any_priced_turn(&self) -> bool {
+        self.cost_attribution.turn_costs.iter().any(Option::is_some)
     }
 
     /// Number of deduplicated turns in this session.
@@ -278,6 +304,19 @@ pub fn share_basis_points(part: u64, whole: u64) -> u64 {
 #[must_use]
 pub fn format_share_pct(bps: u64) -> String {
     format!("{}.{:02}%", bps / 100, bps % 100)
+}
+
+/// Observed model summary rendered by `kakeibo pricing check` (`PLAN.md` §6.2, §6.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedModelPriceStatus {
+    pub model: String,
+    pub is_priced: bool,
+    pub matched_key: Option<String>,
+    pub currency: Option<String>,
+    pub sessions: usize,
+    pub turns: u32,
+    pub prompt_tokens: u64,
+    pub output_tokens: u64,
 }
 
 /// Grouping dimension for `kakeibo top --by <dimension>` (`PLAN.md` §6.4).

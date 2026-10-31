@@ -5,22 +5,27 @@ mod loader;
 mod since;
 
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Parser;
+use kakeibo_core::pricing::{import_litellm_json_str, PricingCatalog};
 use kakeibo_core::product;
-use kakeibo_parse::PathCatalog;
+use kakeibo_index::{load_effective_pricing, save_user_pricing, AppPaths};
+use kakeibo_parse::{open_readonly, PathCatalog};
 use kakeibo_report::ndjson::write_ledger;
 use kakeibo_report::{
     render_autopsy_report, render_cross_session_flags, render_doctor_report,
-    render_markdown_export, render_sessions_table, render_top_table, write_json_export_v1,
-    SessionReport,
+    render_markdown_export, render_pricing_check, render_pricing_list, render_sessions_table,
+    render_top_table, write_json_export_v1, SessionReport,
 };
 
-use crate::cli::{Cli, Commands, ExportArgs, ExportFormat};
-use crate::loader::{load_session_reports, matches_project_filter, run_doctor, select_session};
+use crate::cli::{Cli, Commands, ExportArgs, ExportFormat, PricingCommand};
+use crate::loader::{
+    collect_observed_models, load_session_reports, matches_project_filter, run_doctor,
+    select_session,
+};
 use crate::since::{parse_since_cutoff, resolve_now};
 
 const DEFAULT_RECENT_LIMIT: usize = 20;
@@ -55,7 +60,11 @@ fn open_export_writer(out_path: Option<&Path>) -> Result<Box<dyn Write>, String>
     }
 }
 
-fn execute_export(catalog: &PathCatalog, args: &ExportArgs) -> Result<(), String> {
+fn execute_export(
+    catalog: &PathCatalog,
+    pricing: &PricingCatalog,
+    args: &ExportArgs,
+) -> Result<(), String> {
     if args.format == ExportFormat::Ndjson && args.show_paths {
         return Err(format!(
             "`--show-paths` cannot be combined with `--format ndjson` ({} is strictly pathless)",
@@ -77,8 +86,8 @@ fn execute_export(catalog: &PathCatalog, args: &ExportArgs) -> Result<(), String
     }
 
     let capture_raw_paths = args.show_paths && args.format != ExportFormat::Ndjson;
-    let all_sessions =
-        load_session_reports(catalog, None, capture_raw_paths).map_err(|e| e.to_string())?;
+    let all_sessions = load_session_reports(catalog, pricing, None, capture_raw_paths)
+        .map_err(|e| e.to_string())?;
 
     let selected: Vec<SessionReport> = if let Some(ref selector) = args.session {
         vec![select_session(&all_sessions, selector)?.clone()]
@@ -111,22 +120,33 @@ fn execute_export(catalog: &PathCatalog, args: &ExportArgs) -> Result<(), String
     Ok(())
 }
 
+fn resolve_checked_date(override_date: Option<&str>) -> Result<String, String> {
+    if let Some(explicit) = override_date.map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(explicit.to_string());
+    }
+    let now_iso = resolve_now()?.to_string();
+    Ok(now_iso.get(..10).unwrap_or(&now_iso).to_string())
+}
+
 fn run(cli: Cli) -> Result<(), String> {
     // `--no-cache` (`PLAN.md` §3.2) forces direct raw-log decoding; before T12's
     // incremental index lands, both code paths execute the identical read-only pipeline.
     let _no_cache = cli.no_cache;
     let catalog = PathCatalog::from_env();
+    let app_paths = AppPaths::from_env().map_err(|e| e.to_string())?;
 
     match cli.command {
         None => {
-            let mut sessions =
-                load_session_reports(&catalog, None, false).map_err(|e| e.to_string())?;
+            let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+            let mut sessions = load_session_reports(&catalog, &effective.catalog, None, false)
+                .map_err(|e| e.to_string())?;
             sessions.truncate(DEFAULT_RECENT_LIMIT);
             print!("{}", render_sessions_table(&sessions));
         }
         Some(Commands::Sessions(args)) => {
-            let sessions =
-                load_session_reports(&catalog, args.agent, false).map_err(|e| e.to_string())?;
+            let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+            let sessions = load_session_reports(&catalog, &effective.catalog, args.agent, false)
+                .map_err(|e| e.to_string())?;
             let mut filtered = filter_by_since(sessions, args.since.as_deref())?;
             if let Some(ref proj) = args.project {
                 filtered.retain(|s| matches_project_filter(s, proj));
@@ -134,8 +154,9 @@ fn run(cli: Cli) -> Result<(), String> {
             print!("{}", render_sessions_table(&filtered));
         }
         Some(Commands::Autopsy(args)) => {
-            let sessions =
-                load_session_reports(&catalog, None, false).map_err(|e| e.to_string())?;
+            let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+            let sessions = load_session_reports(&catalog, &effective.catalog, None, false)
+                .map_err(|e| e.to_string())?;
             let target = select_session(&sessions, &args.session)?;
             print!(
                 "{}",
@@ -143,20 +164,69 @@ fn run(cli: Cli) -> Result<(), String> {
             );
         }
         Some(Commands::Flags(args)) => {
-            let sessions =
-                load_session_reports(&catalog, None, false).map_err(|e| e.to_string())?;
+            let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+            let sessions = load_session_reports(&catalog, &effective.catalog, None, false)
+                .map_err(|e| e.to_string())?;
             let filtered = filter_by_since(sessions, args.since.as_deref())?;
             print!("{}", render_cross_session_flags(&filtered));
         }
         Some(Commands::Top(args)) => {
-            let sessions =
-                load_session_reports(&catalog, None, false).map_err(|e| e.to_string())?;
+            let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+            let sessions = load_session_reports(&catalog, &effective.catalog, None, false)
+                .map_err(|e| e.to_string())?;
             let filtered = filter_by_since(sessions, args.since.as_deref())?;
             print!("{}", render_top_table(&filtered, args.by));
         }
         Some(Commands::Export(ref args)) => {
-            execute_export(&catalog, args)?;
+            let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+            execute_export(&catalog, &effective.catalog, args)?;
         }
+        Some(Commands::Pricing(pricing_args)) => match pricing_args.command {
+            PricingCommand::List => {
+                let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+                print!(
+                    "{}",
+                    render_pricing_list(&effective.catalog, effective.has_user_overlay)
+                );
+            }
+            PricingCommand::Check(c_args) => {
+                let effective = load_effective_pricing(&app_paths).map_err(|e| e.to_string())?;
+                let cutoff = match c_args.since.as_deref() {
+                    Some(spec) => Some(parse_since_cutoff(spec, resolve_now()?)?),
+                    None => None,
+                };
+                let observed =
+                    collect_observed_models(&catalog, &effective.catalog, c_args.agent, cutoff)
+                        .map_err(|e| e.to_string())?;
+                print!("{}", render_pricing_check(&observed));
+            }
+            PricingCommand::Import(i_args) => {
+                let mut file = open_readonly(&i_args.file).map_err(|e| {
+                    format!(
+                        "failed to open LiteLLM pricing file `{}`: {e}",
+                        i_args.file.display()
+                    )
+                })?;
+                let mut raw_json = String::new();
+                file.read_to_string(&mut raw_json).map_err(|e| {
+                    format!(
+                        "failed to read LiteLLM pricing file `{}`: {e}",
+                        i_args.file.display()
+                    )
+                })?;
+                let checked = resolve_checked_date(i_args.checked.as_deref())?;
+                let imported =
+                    import_litellm_json_str(&raw_json, &checked).map_err(|e| e.to_string())?;
+                let dest =
+                    save_user_pricing(&app_paths, &imported.catalog).map_err(|e| e.to_string())?;
+                println!(
+                    "Imported {} priced model(s) ({} entries skipped; checked={checked}) into `{}`.",
+                    imported.imported_models,
+                    imported.skipped_entries,
+                    dest.display(),
+                );
+            }
+        },
         Some(Commands::Doctor) => {
             let report = run_doctor(&catalog).map_err(|e| e.to_string())?;
             print!("{}", render_doctor_report(&report));

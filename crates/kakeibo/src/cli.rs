@@ -36,6 +36,8 @@ pub enum Commands {
     Top(TopArgs),
     /// Export one session or a time window as JSON (`schemaVersion: 1`), Markdown, or NDJSON ledger.
     Export(ExportArgs),
+    /// List, check, or import offline model pricing configurations (`PLAN.md` §6.2, §6.4).
+    Pricing(PricingArgs),
     /// Report discovered agent log sources, observed CLI versions, and unknown-record diagnostics.
     Doctor,
 }
@@ -123,4 +125,45 @@ pub struct ExportArgs {
     /// Include unhashed project working directory paths in Markdown or JSON export.
     #[arg(long)]
     pub show_paths: bool,
+}
+
+/// Arguments for `pricing`.
+#[derive(clap::Args, Debug)]
+pub struct PricingArgs {
+    #[command(subcommand)]
+    pub command: PricingCommand,
+}
+
+/// Subcommands under `pricing` (`PLAN.md` §6.4, §10 T09).
+#[derive(Subcommand, Debug)]
+pub enum PricingCommand {
+    /// List effective model pricing entries, provenance URLs, and checked dates.
+    List,
+    /// Check which models observed in local session logs have configured pricing.
+    Check(PricingCheckArgs),
+    /// Import model prices offline from a local LiteLLM `model_prices_and_context_window.json` file.
+    Import(PricingImportArgs),
+}
+
+/// Arguments for `pricing check`.
+#[derive(clap::Args, Debug, Default)]
+pub struct PricingCheckArgs {
+    /// Filter observed models by source coding agent (`claude-code` or `codex`).
+    #[arg(long)]
+    pub agent: Option<AgentId>,
+
+    /// Filter sessions active at or after `<N>{s|m|h|d|w}` ago or an RFC 3339 UTC timestamp.
+    #[arg(long)]
+    pub since: Option<String>,
+}
+
+/// Arguments for `pricing import`.
+#[derive(clap::Args, Debug)]
+pub struct PricingImportArgs {
+    /// Path to a local LiteLLM `model_prices_and_context_window.json` file (opened read-only).
+    pub file: PathBuf,
+
+    /// Override the `YYYY-MM-DD` `checked` provenance date recorded on imported entries.
+    #[arg(long)]
+    pub checked: Option<String>,
 }

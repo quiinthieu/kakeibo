@@ -6,15 +6,26 @@ use std::io;
 
 use kakeibo_core::attrib::attribute_session_with_subagents;
 use kakeibo_core::flags::{evaluate_flags_v1, FlagsConfig, ModelCatalog};
-use kakeibo_core::{AgentId, TurnRecord};
+use kakeibo_core::pricing::PricingCatalog;
+use kakeibo_core::{AgentId, Confidence, Timestamp, TurnRecord};
 use kakeibo_parse::hash::hash_cwd;
 use kakeibo_parse::{
     extract_claude_session_cwds, extract_codex_session_cwds, parse_claude_file,
     parse_claude_file_with_options, parse_codex_file, ClaudeParseOptions, PathCatalog,
 };
-use kakeibo_report::{sort_session_reports, DoctorReport, DoctorSourceSummary, SessionReport};
+use kakeibo_report::{
+    sort_session_reports, DoctorReport, DoctorSourceSummary, ObservedModelPriceStatus,
+    SessionReport,
+};
 
 type SessionKey = (AgentId, String);
+type SubagentMap = BTreeMap<SessionKey, BTreeMap<String, Vec<TurnRecord>>>;
+
+struct DiscoveredCorpus {
+    primary_turns: BTreeMap<SessionKey, Vec<TurnRecord>>,
+    subagents_by_parent: SubagentMap,
+    raw_cwds: BTreeMap<SessionKey, String>,
+}
 
 fn dedupe_and_renumber_turns(mut turns: Vec<TurnRecord>) -> Vec<TurnRecord> {
     if turns.len() <= 1 {
@@ -72,16 +83,13 @@ fn compute_corpus_median_p1(
     }
 }
 
-/// Discovers, decodes, links subagents, attributes, and evaluates v1 flags across
-/// local read-only agent logs (`PLAN.md` §3.2).
-pub fn load_session_reports(
+fn discover_raw_sessions(
     catalog: &PathCatalog,
     agent_filter: Option<AgentId>,
     capture_raw_paths: bool,
-) -> io::Result<Vec<SessionReport>> {
+) -> io::Result<DiscoveredCorpus> {
     let mut primary_turns: BTreeMap<SessionKey, Vec<TurnRecord>> = BTreeMap::new();
-    let mut subagents_by_parent: BTreeMap<SessionKey, BTreeMap<String, Vec<TurnRecord>>> =
-        BTreeMap::new();
+    let mut subagents_by_parent: SubagentMap = BTreeMap::new();
     let mut raw_cwds: BTreeMap<SessionKey, String> = BTreeMap::new();
 
     if agent_filter.is_none_or(|a| a == AgentId::ClaudeCode) {
@@ -165,13 +173,31 @@ pub fn load_session_reports(
         *turns = dedupe_and_renumber_turns(taken);
     }
 
-    let user_median_p1 = compute_corpus_median_p1(&primary_turns);
+    Ok(DiscoveredCorpus {
+        primary_turns,
+        subagents_by_parent,
+        raw_cwds,
+    })
+}
+
+/// Discovers, decodes, links subagents, attributes, evaluates v1 flags, and prices
+/// sessions across local read-only agent logs (`PLAN.md` §3.2, §6.2).
+pub fn load_session_reports(
+    catalog: &PathCatalog,
+    pricing: &PricingCatalog,
+    agent_filter: Option<AgentId>,
+    capture_raw_paths: bool,
+) -> io::Result<Vec<SessionReport>> {
+    let mut corpus = discover_raw_sessions(catalog, agent_filter, capture_raw_paths)?;
+
+    let user_median_p1 = compute_corpus_median_p1(&corpus.primary_turns);
     let flags_cfg = FlagsConfig::bundled();
     let models = ModelCatalog::bundled();
 
-    let mut reports = Vec::with_capacity(primary_turns.len());
-    for ((agent, sid), turns) in primary_turns {
-        let child_vecs: Vec<Vec<TurnRecord>> = subagents_by_parent
+    let mut reports = Vec::with_capacity(corpus.primary_turns.len());
+    for ((agent, sid), turns) in corpus.primary_turns {
+        let child_vecs: Vec<Vec<TurnRecord>> = corpus
+            .subagents_by_parent
             .remove(&(agent, sid.clone()))
             .map(|m| m.into_values().map(dedupe_and_renumber_turns).collect())
             .unwrap_or_default();
@@ -180,18 +206,116 @@ pub fn load_session_reports(
         let attribution = attribute_session_with_subagents(&turns, &child_slices);
         let flags = evaluate_flags_v1(&turns, &attribution, &flags_cfg, &models, user_median_p1);
         let project_path = if capture_raw_paths {
-            raw_cwds.remove(&(agent, sid.clone()))
+            corpus.raw_cwds.remove(&(agent, sid.clone()))
         } else {
             None
         };
 
-        if let Some(report) = SessionReport::build(turns, attribution, flags, project_path) {
+        if let Some(report) = SessionReport::build_with_pricing(
+            turns,
+            &child_slices,
+            attribution,
+            flags,
+            project_path,
+            pricing,
+        ) {
             reports.push(report);
         }
     }
 
     sort_session_reports(&mut reports);
     Ok(reports)
+}
+
+#[derive(Default)]
+struct ObservedModelAcc {
+    sessions: BTreeSet<SessionKey>,
+    turns: u32,
+    prompt_tokens: u64,
+    output_tokens: u64,
+}
+
+/// Scans discovered read-only session logs and summarizes pricing coverage for every
+/// observed model (`pricing check`, `PLAN.md` §6.2, §6.4).
+pub fn collect_observed_models(
+    catalog: &PathCatalog,
+    pricing: &PricingCatalog,
+    agent_filter: Option<AgentId>,
+    cutoff: Option<Timestamp>,
+) -> io::Result<Vec<ObservedModelPriceStatus>> {
+    let mut corpus = discover_raw_sessions(catalog, agent_filter, false)?;
+    let mut acc_by_model: BTreeMap<String, ObservedModelAcc> = BTreeMap::new();
+
+    for ((agent, sid), turns) in corpus.primary_turns {
+        let child_vecs: Vec<Vec<TurnRecord>> = corpus
+            .subagents_by_parent
+            .remove(&(agent, sid.clone()))
+            .map(|m| m.into_values().map(dedupe_and_renumber_turns).collect())
+            .unwrap_or_default();
+
+        if let Some(cut) = cutoff {
+            let max_ts = turns
+                .iter()
+                .chain(child_vecs.iter().flatten())
+                .map(|tr| tr.ts)
+                .max();
+            if max_ts.is_none_or(|ended| ended < cut) {
+                continue;
+            }
+        }
+
+        for tr in turns.iter().chain(child_vecs.iter().flatten()) {
+            if tr.usage.confidence == Confidence::NotRecorded {
+                continue;
+            }
+            let model_name = tr
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .unwrap_or("unknown")
+                .to_string();
+            let entry = acc_by_model.entry(model_name).or_default();
+            entry.sessions.insert((agent, sid.clone()));
+            entry.turns = entry.turns.saturating_add(1);
+            entry.prompt_tokens = entry.prompt_tokens.saturating_add(tr.usage.prompt_tokens());
+            entry.output_tokens = entry.output_tokens.saturating_add(tr.usage.output);
+        }
+    }
+
+    let mut observed: Vec<ObservedModelPriceStatus> = acc_by_model
+        .into_iter()
+        .map(|(model, acc)| {
+            let resolved = if model == "unknown" {
+                None
+            } else {
+                pricing.resolve_priced(Some(&model))
+            };
+            ObservedModelPriceStatus {
+                model,
+                is_priced: resolved.is_some(),
+                matched_key: resolved.map(|(k, _)| k.to_string()),
+                currency: resolved.map(|(_, e)| e.currency.clone()),
+                sessions: acc.sessions.len(),
+                turns: acc.turns,
+                prompt_tokens: acc.prompt_tokens,
+                output_tokens: acc.output_tokens,
+            }
+        })
+        .collect();
+
+    observed.sort_by(|a, b| {
+        a.is_priced
+            .cmp(&b.is_priced)
+            .then_with(|| {
+                let b_tot = b.prompt_tokens.saturating_add(b.output_tokens);
+                let a_tot = a.prompt_tokens.saturating_add(a.output_tokens);
+                b_tot.cmp(&a_tot)
+            })
+            .then_with(|| a.model.cmp(&b.model))
+    });
+
+    Ok(observed)
 }
 
 /// Matches a [`SessionReport`] against `--project <PATH_OR_HASH>` without storing raw paths in `TurnRecord`.

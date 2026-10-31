@@ -67,8 +67,9 @@ For the streaming turn-level ledger (`"schema": "kakeibo.ledger/1"`) emitted by 
 
 | Field | JSON Type | Required | Description |
 |---|---|---|---|
-| `status` | `string` | yes | `"unpriced"` (no user pricing table entry applied) or `"agent_reported"` (cost logged directly by the agent). (T09 adds `"configured"`.) |
-| `usd` | `number \| null` | yes | `null` when `status == "unpriced"`; finite USD sum when `status == "agent_reported"`. |
+| `status` | `string` | yes | `"unpriced"` (no user pricing table entry applied), `"configured"` (every turn in the session matched a configured price), `"partial_configured"` (some turns matched a configured price while one or more turns remained unpriced), or `"agent_reported"` (cost logged directly by the agent when unconfigured). |
+| `currency` | `string` | no | ISO currency code (e.g. `"USD"`) when `status` is `"configured"` or `"partial_configured"`; omitted when `"unpriced"`. |
+| `usd` | `number \| null` | yes | `null` when `status == "unpriced"` (or non-USD currency); finite USD sum when priced in `"USD"` or `"agent_reported"`. |
 
 ---
 
@@ -112,6 +113,7 @@ For the streaming turn-level ledger (`"schema": "kakeibo.ledger/1"`) emitted by 
 | `cache_read` | `integer` (`u64`) | yes | Cache read tokens attributed to this category. |
 | `output` | `integer` (`u64`) | yes | Output tokens attributed to this category. |
 | `share_bps` | `integer` (`u64`) | yes | Share of `totals.total_tokens` in integer basis points (`0..=10000`, `floor(total_tokens * 10000 / session_total_tokens)`). |
+| `cost_usd` | `number` (`f64`) | no | Reconciled API-equivalent USD cost attributed to this category when `cost.status == "configured"` (`currency == "USD"`); omitted when unpriced. |
 
 **Reconciliation invariant:** Across all nine keys in `categories.breakdown`, the component-wise sums of `fresh_in`, `cache_write`, `cache_read`, and `output` equal `totals.fresh_in`, `totals.cache_write`, `totals.cache_read`, and `totals.output` exactly.
 
@@ -173,6 +175,9 @@ Aggregates carried `ToolUse` and `ToolResult` blocks by tool name, ranked by `li
 | `prompt_tokens` | `integer` (`u64`) | yes | `measured.fresh_in + measured.cache_write + measured.cache_read`. |
 | `measured` | `object` (`TokenSplit`) | yes | `{ "fresh_in": u64, "cache_write": u64, "cache_read": u64, "output": u64 }`. |
 | `measured_confidence` | `string` (`Confidence`) | yes | Provenance confidence of `measured`. |
+| `cache_write_5m_tokens` | `integer` (`u64`) | no | 5-minute TTL prompt-cache write tokens on this turn when priced; omitted when unpriced. |
+| `cache_write_1h_tokens` | `integer` (`u64`) | no | 1-hour TTL prompt-cache write tokens on this turn when priced; omitted when unpriced. |
+| `cost_usd` | `number` (`f64`) | no | API-equivalent USD cost of this turn when priced (`currency == "USD"`); omitted when unpriced. |
 | `categories` | `object` (`CategoryBreakdown`) | yes | Map of all 9 `Category` keys to `TokenSplit`, reconciling exactly to `measured`. |
 | `category_confidence` | `string` (`Confidence`) | yes | Provenance confidence of `categories`. |
 | `estimation_method` | `string` | yes | `"utf8_bytes_div4_ceil_scaled"`. |

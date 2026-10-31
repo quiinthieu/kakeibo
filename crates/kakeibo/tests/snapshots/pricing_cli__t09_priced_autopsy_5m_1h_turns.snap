@@ -1,0 +1,40 @@
+---
+source: crates/kakeibo/tests/pricing_cli.rs
+expression: autopsy_stdout
+---
+Session:        sess-priced-5m1h (claude-code)
+Window:         2026-10-31T12:00:02Z .. 2026-10-31T12:00:06Z (2 turns)
+Models:         claude-sonnet-4-5
+Project:        proj:6782507b5c6917db
+Totals:         64,500 prompt (1,500 fresh / 32,000 write / 31,000 read) + 800 output = 65,300 tokens (measured)
+Fixed overhead: 30,996 tokens (estimated: utf8_bytes_div4_ceil_scaled)
+Cost:           $0.1272 (API-equiv)
+
+Categories (estimated: utf8_bytes_div4_ceil_scaled):
+CATEGORY           TOTAL   SHARE  FRESH   WRITE    READ  OUT     COST
+----------------  ------  ------  -----  ------  ------  ---  -------
+fixed_overhead    61,992  94.93%    996  30,000  30,996    0  $0.1132
+resent_history         4   0.00%      0       0       4    0  $0.0000
+tool_output           75   0.11%     15      60       0    0  $0.0002
+retries                0   0.00%      0       0       0    0  $0.0000
+user_input             4   0.00%      4       0       0    0  $0.0000
+assistant_output     800   1.22%      0       0       0  800  $0.0080
+subagents              0   0.00%      0       0       0    0  $0.0000
+compaction             0   0.00%      0       0       0    0  $0.0000
+unattributed       2,425   3.71%    485   1,940       0    0  $0.0058
+
+Flags:
+[heavy-overhead] turns=1 (31,000 tokens, measured)
+  First request on turn 1 started with 31,000 prompt tokens before conversation growth (~30,996 fixed overhead tokens).
+  evidence: turn=1, P(1)=31,000 (measured), fixed_overhead=30,996 (estimated: utf8_bytes_div4_ceil_scaled); try `bentoctx budget`
+
+Tools (estimated: utf8_bytes_div4_ceil_scaled):
+TOOL  CALLS  RESULTS  ERRORS  BYTES  INITIAL  CARRIED  LIFETIME
+----  -----  -------  ------  -----  -------  -------  --------
+Read      1        1       0     75       75        0        75
+
+Turns (measured):
+TURN  TIMESTAMP             MODEL              PROMPT  FRESH   WRITE    READ  OUT     COST  HINTS
+----  --------------------  -----------------  ------  -----  ------  ------  ---  -------  -----
+   1  2026-10-31T12:00:02Z  claude-sonnet-4-5  31,000  1,000  30,000       0  500  $0.1120  -
+   2  2026-10-31T12:00:06Z  claude-sonnet-4-5  33,500    500   2,000  31,000  300  $0.0152  -
