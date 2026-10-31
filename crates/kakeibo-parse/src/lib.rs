@@ -1,5 +1,6 @@
 //! Read-only per-agent log discovery and streaming decoders for Kakeibo.
 
+pub mod aider;
 pub mod catalog;
 pub mod claude;
 pub mod codex;
@@ -9,6 +10,10 @@ pub mod hash;
 pub mod line_reader;
 pub mod opencode;
 
+pub use aider::{
+    parse_aider_analytics_file, parse_aider_analytics_reader, parse_aider_history_file,
+    parse_aider_history_reader, AiderParseOutput, AiderSessionBatch,
+};
 pub use catalog::{open_readonly, DiscoveredLog, DiscoveredSubagentLog, PathCatalog};
 pub use claude::{
     parse_claude_file, parse_claude_file_with_options, parse_claude_reader, ClaudeParseOptions,
@@ -16,8 +21,8 @@ pub use claude::{
 };
 pub use codex::{parse_codex_file, parse_codex_reader, CodexParseOutput};
 pub use cwd::{
-    extract_claude_session_cwds, extract_codex_session_cwds, extract_gemini_session_cwds,
-    extract_opencode_session_cwds,
+    extract_aider_session_cwds, extract_claude_session_cwds, extract_codex_session_cwds,
+    extract_gemini_session_cwds, extract_opencode_session_cwds,
 };
 pub use gemini::{
     parse_gemini_file, parse_gemini_file_with_options, parse_gemini_reader, GeminiParseOptions,
