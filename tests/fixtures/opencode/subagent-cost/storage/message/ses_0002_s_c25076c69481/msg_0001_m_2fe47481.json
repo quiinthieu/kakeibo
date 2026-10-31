@@ -1,0 +1,13 @@
+{
+  "agent": "general",
+  "id": "msg_0001_m_2fe47481",
+  "model": {
+    "modelID": "claude-haiku-4-5",
+    "providerID": "anthropic"
+  },
+  "role": "user",
+  "sessionID": "ses_0002_s_c25076c69481",
+  "time": {
+    "created": 1793440803500
+  }
+}

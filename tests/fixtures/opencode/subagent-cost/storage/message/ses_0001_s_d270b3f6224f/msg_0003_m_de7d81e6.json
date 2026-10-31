@@ -1,0 +1,13 @@
+{
+  "agent": "build",
+  "id": "msg_0003_m_de7d81e6",
+  "model": {
+    "modelID": "claude-opus-4-5",
+    "providerID": "anthropic"
+  },
+  "role": "user",
+  "sessionID": "ses_0001_s_d270b3f6224f",
+  "time": {
+    "created": 1793440810000
+  }
+}

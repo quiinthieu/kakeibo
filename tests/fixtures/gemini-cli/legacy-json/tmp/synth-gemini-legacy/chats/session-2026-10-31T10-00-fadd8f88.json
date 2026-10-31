@@ -1,0 +1,74 @@
+{
+  "kind": "main",
+  "lastUpdated": "2026-10-31T10:00:10Z",
+  "messages": [
+    {
+      "content": "tablet archive pocket manifest ledger cache tunnel vertex kernel delta tracer pocket canvas.",
+      "id": "2de7abf1-7c82-43fd-a2a2-8466f71600d2",
+      "timestamp": "2026-10-31T10:00:01Z",
+      "type": "user"
+    },
+    {
+      "content": "meadow vector engine catalog report matrix syntax beacon manifest zenith vertex relay prefix locale vertex .",
+      "id": "2fc49cce-d483-4c14-a348-b275f574be93",
+      "model": "gemini-2.5-flash",
+      "timestamp": "2026-10-31T10:00:04Z",
+      "tokens": {
+        "cached": 2400,
+        "input": 4135,
+        "output": 78,
+        "thoughts": 32,
+        "tool": 0,
+        "total": 4245
+      },
+      "toolCalls": [
+        {
+          "args": {
+            "command": "cargo test --lib"
+          },
+          "id": "call_95b0a2a336ee",
+          "name": "run_shell_command",
+          "result": [
+            {
+              "functionResponse": {
+                "id": "call_95b0a2a336ee",
+                "name": "run_shell_command",
+                "response": {
+                  "output": "archive diary block schema lantern needle factor checkpoint epoch orbit beacon pebble orbit pebble index diary token header stride horizon syntax frame source epoch record archive compass graph kernel prism balance tracer context index pebble ledg."
+                }
+              }
+            }
+          ],
+          "resultDisplay": "archive diary block schema lantern needle factor checkpoint epoch orbit beacon pebble orbit pebble index diary token header stride horizon syntax frame source epoch record archive compass graph kernel prism balance tracer context index pebble ledg.",
+          "status": "success"
+        }
+      ],
+      "type": "gemini"
+    },
+    {
+      "content": "manifest matrix target factor cipher source catalog loc.",
+      "id": "641b3a3d-ad27-4b51-b8df-7a4bdc19e30a",
+      "timestamp": "2026-10-31T10:00:06Z",
+      "type": "error"
+    },
+    {
+      "content": "router vessel packet frame Attribution beacon tablet summit alpha prompt kernel engine pocket sketch frame matrix budget circuit lantern journal",
+      "id": "cc5b18ff-fe2a-47eb-b9c5-7db13e79b049",
+      "model": "gemini-2.5-flash",
+      "timestamp": "2026-10-31T10:00:10Z",
+      "tokens": {
+        "cached": 4135,
+        "input": 4503,
+        "output": 104,
+        "thoughts": 0,
+        "tool": 48,
+        "total": 4655
+      },
+      "type": "gemini"
+    }
+  ],
+  "projectHash": "6f76aabaf7e04686936ad8894a1c63690c8f2e1c4142962d6cfba14691bcaf13",
+  "sessionId": "fadd8f88-cda9-4380-b84d-5728c8c189f8",
+  "startTime": "2026-10-31T10:00:00Z",
+  "summary": "metric orbit vessel digest target f."
+}

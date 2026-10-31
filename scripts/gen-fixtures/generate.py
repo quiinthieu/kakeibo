@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -2433,6 +2434,1055 @@ def gen_litellm_pricing_tiny(rng: SplitMix64, seed: int) -> dict[str, bytes]:
     }
 
 
+def gen_gemini_rewind_patch(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Synthetic Gemini CLI 0.41.2 JSONL session exercising `$patch`, same-ID upserts,
+    `$rewindTo` truncation (target + subsequent messages), `$set`, and `projects.json` (`T10`).
+    """
+    session_id = rng.uuid_str()
+    slug = "synth-gemini-alpha"
+    cwd = "/synthetic/workspace/gemini-alpha"
+    project_hash = hashlib.sha256(cwd.encode("utf-8")).hexdigest()
+    log_rel = f"tmp/{slug}/chats/session-2026-10-31T09-00-{session_id[:8]}.jsonl"
+    model = "gemini-2.5-pro"
+
+    records: list[dict[str, Any]] = []
+    turns_gt: list[dict[str, Any]] = []
+
+    # 1. Conversation metadata header (`ignored_records += 1`).
+    records.append(
+        {
+            "directories": [cwd],
+            "kind": "main",
+            "lastUpdated": "2026-10-31T09:00:00Z",
+            "projectHash": project_hash,
+            "sessionId": session_id,
+            "startTime": "2026-10-31T09:00:00Z",
+        }
+    )
+
+    # 2. Turn 1 user prompt (`PartListUnion` array form).
+    u1_id = rng.uuid_str()
+    u1_text = rng.synth_text(104)
+    records.append(
+        {
+            "content": [{"text": u1_text}],
+            "id": u1_id,
+            "timestamp": "2026-10-31T09:00:01Z",
+            "type": "user",
+        }
+    )
+
+    # 3. Turn 1 initial `"gemini"` message with `thoughts` and `executing` tool call.
+    g1_id = rng.uuid_str()
+    th1_subj = "Inspect parser module"
+    th1_desc = rng.synth_text(88)
+    a1_text = rng.synth_text(120)
+    call1_id = rng.hex_id("call", 12)
+    tool1_args = {"file_path": "crates/kakeibo-parse/src/lib.rs"}
+    tool1_args_bytes = len(
+        json.dumps(tool1_args, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+
+    t1_cached = 6400
+    t1_input = 8200 + rng.rand_range(0, 60)
+    t1_tool = 140
+    t1_out_body = 96
+    t1_thoughts = 54
+
+    records.append(
+        {
+            "content": a1_text,
+            "id": g1_id,
+            "model": model,
+            "thoughts": [
+                {
+                    "description": th1_desc,
+                    "subject": th1_subj,
+                    "timestamp": "2026-10-31T09:00:02Z",
+                }
+            ],
+            "timestamp": "2026-10-31T09:00:03Z",
+            "tokens": {
+                "cached": t1_cached,
+                "input": t1_input,
+                "output": t1_out_body,
+                "thoughts": t1_thoughts,
+                "tool": t1_tool,
+                "total": t1_input + t1_tool + t1_out_body + t1_thoughts,
+            },
+            "toolCalls": [
+                {
+                    "args": tool1_args,
+                    "displayName": "ReadFile",
+                    "id": call1_id,
+                    "name": "read_file",
+                    "status": "executing",
+                }
+            ],
+            "type": "gemini",
+        }
+    )
+
+    # 4. RFC-6902 `$patch` attaching tool output (`result`) and `"success"` status to `g1_id`.
+    tr1_text = rng.synth_text(312)
+    records.append(
+        {
+            "$patch": [
+                {
+                    "op": "add",
+                    "path": "/toolCalls/0/result",
+                    "value": [
+                        {
+                            "functionResponse": {
+                                "id": call1_id,
+                                "name": "read_file",
+                                "response": {"output": tr1_text},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "op": "replace",
+                    "path": "/toolCalls/0/status",
+                    "value": "success",
+                },
+            ],
+            "id": g1_id,
+        }
+    )
+
+    t1_prompt = t1_input + t1_tool
+    t1_fresh = t1_prompt - t1_cached
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {
+                    "bytes": len(th1_subj.encode("utf-8")) + len(th1_desc.encode("utf-8")),
+                    "kind": "assistant_thinking",
+                    "tool": None,
+                },
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+                {"bytes": tool1_args_bytes, "kind": "tool_use", "tool": "read_file"},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t1_prompt,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:00:03Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": t1_cached,
+                "cache_write": 0,
+                "confidence": "measured",
+                "fresh_in": t1_fresh,
+                "output": t1_out_body + t1_thoughts,
+                "reasoning": t1_thoughts,
+            },
+        }
+    )
+
+    # 5 & 6. Abandoned user + gemini exchange later discarded by `$rewindTo`.
+    u_abandoned_id = rng.uuid_str()
+    records.append(
+        {
+            "content": rng.synth_text(84),
+            "id": u_abandoned_id,
+            "timestamp": "2026-10-31T09:00:05Z",
+            "type": "user",
+        }
+    )
+    g_abandoned_id = rng.uuid_str()
+    records.append(
+        {
+            "content": rng.synth_text(160),
+            "id": g_abandoned_id,
+            "model": model,
+            "timestamp": "2026-10-31T09:00:07Z",
+            "tokens": {
+                "cached": 4000,
+                "input": 55000,
+                "output": 900,
+                "thoughts": 300,
+                "tool": 0,
+                "total": 56200,
+            },
+            "type": "gemini",
+        }
+    )
+
+    # 7. `$rewindTo` removes `u_abandoned_id` AND `g_abandoned_id` (`ignored_records += 1`).
+    records.append({"$rewindTo": u_abandoned_id})
+
+    # 8. Non-turn `"info"` message (`ignored_records += 1`).
+    records.append(
+        {
+            "content": rng.synth_text(64),
+            "id": rng.uuid_str(),
+            "timestamp": "2026-10-31T09:00:08Z",
+            "type": "info",
+        }
+    )
+
+    # 9 & 10. Turn 2 `"gemini"` message written first without tokens, then upserted by same ID.
+    g2_id = rng.uuid_str()
+    a2_draft = rng.synth_text(48)
+    a2_final = rng.synth_text(176)
+    records.append(
+        {
+            "content": a2_draft,
+            "id": g2_id,
+            "model": model,
+            "timestamp": "2026-10-31T09:00:10Z",
+            "type": "gemini",
+        }
+    )
+
+    t2_cached = t1_prompt
+    t2_input = t1_prompt + 420 + rng.rand_range(0, 40)
+    t2_tool = 80
+    t2_out_body = 132
+    records.append(
+        {
+            "content": a2_final,
+            "id": g2_id,
+            "model": model,
+            "timestamp": "2026-10-31T09:00:12Z",
+            "tokens": {
+                "cached": t2_cached,
+                "input": t2_input,
+                "output": t2_out_body,
+                "thoughts": 0,
+                "tool": t2_tool,
+                "total": t2_input + t2_tool + t2_out_body,
+            },
+            "type": "gemini",
+        }
+    )
+
+    # 11. `$set` metadata update (`ignored_records += 1`).
+    records.append(
+        {
+            "$set": {
+                "lastUpdated": "2026-10-31T09:00:12Z",
+                "summary": rng.synth_text(40),
+            }
+        }
+    )
+
+    t2_prompt = t2_input + t2_tool
+    t2_fresh = t2_prompt - t2_cached
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(tr1_text.encode("utf-8")), "kind": "tool_result", "tool": "read_file"},
+                {"bytes": len(a2_final.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t2_prompt,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:00:12Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": t2_cached,
+                "cache_write": 0,
+                "confidence": "measured",
+                "fresh_in": t2_fresh,
+                "output": t2_out_body,
+                "reasoning": None,
+            },
+        }
+    )
+
+    projects_doc = {"projects": {cwd: slug}}
+    expected = {
+        "agent": "gemini-cli",
+        "log_files": [log_rel],
+        "scenario": "rewind-patch",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 4,
+                "model": model,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    return {
+        "gemini-cli/rewind-patch/projects.json": dumps_pretty_json(projects_doc),
+        f"gemini-cli/rewind-patch/{log_rel}": dumps_jsonl(records),
+        "gemini-cli/rewind-patch/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_gemini_legacy_json(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Synthetic legacy Gemini CLI single-object `.json` `ConversationRecord`
+    with `.project_root` marker and intermediate `type: "error"` message (`T10`).
+    """
+    session_id = rng.uuid_str()
+    slug = "synth-gemini-legacy"
+    cwd = "/synthetic/workspace/gemini-legacy"
+    project_hash = hashlib.sha256(cwd.encode("utf-8")).hexdigest()
+    log_rel = f"tmp/{slug}/chats/session-2026-10-31T10-00-{session_id[:8]}.json"
+    model = "gemini-2.5-flash"
+
+    u1_text = rng.synth_text(92)
+    a1_text = rng.synth_text(108)
+    call1_id = rng.hex_id("call", 12)
+    tool1_args = {"command": "cargo test --lib"}
+    tool1_args_bytes = len(
+        json.dumps(tool1_args, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    tr1_text = rng.synth_text(248)
+    err_text = rng.synth_text(56)
+    a2_text = rng.synth_text(144)
+
+    t1_cached = 2400
+    t1_input = 4100 + rng.rand_range(0, 50)
+    t1_out = 78
+    t1_thoughts = 32
+
+    t2_cached = t1_input
+    t2_input = t1_input + 340 + rng.rand_range(0, 30)
+    t2_tool = 48
+    t2_out = 104
+
+    conversation_doc = {
+        "kind": "main",
+        "lastUpdated": "2026-10-31T10:00:10Z",
+        "messages": [
+            {
+                "content": u1_text,
+                "id": rng.uuid_str(),
+                "timestamp": "2026-10-31T10:00:01Z",
+                "type": "user",
+            },
+            {
+                "content": a1_text,
+                "id": rng.uuid_str(),
+                "model": model,
+                "timestamp": "2026-10-31T10:00:04Z",
+                "tokens": {
+                    "cached": t1_cached,
+                    "input": t1_input,
+                    "output": t1_out,
+                    "thoughts": t1_thoughts,
+                    "tool": 0,
+                    "total": t1_input + t1_out + t1_thoughts,
+                },
+                "toolCalls": [
+                    {
+                        "args": tool1_args,
+                        "id": call1_id,
+                        "name": "run_shell_command",
+                        "result": [
+                            {
+                                "functionResponse": {
+                                    "id": call1_id,
+                                    "name": "run_shell_command",
+                                    "response": {"output": tr1_text},
+                                }
+                            }
+                        ],
+                        "resultDisplay": tr1_text,
+                        "status": "success",
+                    }
+                ],
+                "type": "gemini",
+            },
+            {
+                "content": err_text,
+                "id": rng.uuid_str(),
+                "timestamp": "2026-10-31T10:00:06Z",
+                "type": "error",
+            },
+            {
+                "content": a2_text,
+                "id": rng.uuid_str(),
+                "model": model,
+                "timestamp": "2026-10-31T10:00:10Z",
+                "tokens": {
+                    "cached": t2_cached,
+                    "input": t2_input,
+                    "output": t2_out,
+                    "thoughts": 0,
+                    "tool": t2_tool,
+                    "total": t2_input + t2_tool + t2_out,
+                },
+                "type": "gemini",
+            },
+        ],
+        "projectHash": project_hash,
+        "sessionId": session_id,
+        "startTime": "2026-10-31T10:00:00Z",
+        "summary": rng.synth_text(36),
+    }
+
+    t2_hints = default_hints()
+    t2_hints["api_error"] = True
+
+    turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+                {"bytes": tool1_args_bytes, "kind": "tool_use", "tool": "run_shell_command"},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t1_input,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:00:04Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": t1_cached,
+                "cache_write": 0,
+                "confidence": "measured",
+                "fresh_in": t1_input - t1_cached,
+                "output": t1_out + t1_thoughts,
+                "reasoning": t1_thoughts,
+            },
+        },
+        {
+            "added_blocks": [
+                {
+                    "bytes": len(tr1_text.encode("utf-8")),
+                    "kind": "tool_result",
+                    "tool": "run_shell_command",
+                },
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": t2_hints,
+            "model": model,
+            "prompt_tokens": t2_input + t2_tool,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:00:10Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": t2_cached,
+                "cache_write": 0,
+                "confidence": "measured",
+                "fresh_in": (t2_input + t2_tool) - t2_cached,
+                "output": t2_out,
+                "reasoning": None,
+            },
+        },
+    ]
+
+    projects_doc = {"projects": {cwd: slug}}
+    expected = {
+        "agent": "gemini-cli",
+        "log_files": [log_rel],
+        "scenario": "legacy-json",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 1,
+                "model": model,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    return {
+        "gemini-cli/legacy-json/projects.json": dumps_pretty_json(projects_doc),
+        f"gemini-cli/legacy-json/tmp/{slug}/.project_root": (cwd + "\n").encode("utf-8"),
+        f"gemini-cli/legacy-json/{log_rel}": dumps_pretty_json(conversation_doc),
+        "gemini-cli/legacy-json/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_opencode_legacy_tree(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Synthetic OpenCode legacy `storage/{session,message,part}/` JSON hierarchy
+    exercising disjoint `tokens.cache.{read,write}`, `reasoning`, tool I/O, and zero `cost` (`T10`).
+    """
+    project_id = rng.hex_id("prj", 16)
+    session_id = rng.hex_id("ses", 16)
+    cwd = "/synthetic/workspace/opencode-alpha"
+    model_id = "claude-sonnet-4-5"
+    provider_id = "anthropic"
+    version = "1.2.4"
+
+    session_rel = f"storage/session/{project_id}/{session_id}.json"
+    session_doc = {
+        "directory": cwd,
+        "id": session_id,
+        "parentID": None,
+        "projectID": project_id,
+        "slug": "synth-opencode-alpha",
+        "time": {"created": 1793437200000, "updated": 1793437212000},
+        "title": rng.synth_text(32),
+        "version": version,
+    }
+
+    u1_msg_id = f"msg_0001_{rng.hex_id('m', 8)}"
+    u1_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    u1_text = rng.synth_text(100)
+    u1_msg_doc = {
+        "agent": "build",
+        "id": u1_msg_id,
+        "model": {"modelID": model_id, "providerID": provider_id},
+        "role": "user",
+        "sessionID": session_id,
+        "time": {"created": 1793437201000},
+    }
+    u1_prt_doc = {
+        "id": u1_prt_id,
+        "messageID": u1_msg_id,
+        "sessionID": session_id,
+        "text": u1_text,
+        "type": "text",
+    }
+
+    a1_msg_id = f"msg_0002_{rng.hex_id('m', 8)}"
+    a1_step_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    a1_think_prt_id = f"prt_0002_{rng.hex_id('p', 8)}"
+    a1_text_prt_id = f"prt_0003_{rng.hex_id('p', 8)}"
+    a1_tool_prt_id = f"prt_0004_{rng.hex_id('p', 8)}"
+    call1_id = rng.hex_id("call", 12)
+    th1_text = rng.synth_text(80)
+    a1_text = rng.synth_text(116)
+    tool1_input = {"filePath": "/synthetic/workspace/opencode-alpha/src/main.rs"}
+    tool1_input_bytes = len(
+        json.dumps(tool1_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    tr1_text = rng.synth_text(296)
+
+    t1_fresh = 380 + rng.rand_range(0, 40)
+    t1_cw = 8600
+    t1_cr = 0
+    t1_out_body = 92
+    t1_reasoning = 44
+
+    a1_msg_doc = {
+        "agent": "build",
+        "cost": 0,
+        "finish": "tool-calls",
+        "id": a1_msg_id,
+        "mode": "build",
+        "modelID": model_id,
+        "parentID": u1_msg_id,
+        "path": {"cwd": cwd, "root": cwd},
+        "providerID": provider_id,
+        "role": "assistant",
+        "sessionID": session_id,
+        "time": {"completed": 1793437204000, "created": 1793437202000},
+        "tokens": {
+            "cache": {"read": t1_cr, "write": t1_cw},
+            "input": t1_fresh,
+            "output": t1_out_body,
+            "reasoning": t1_reasoning,
+        },
+    }
+    a1_step_prt_doc = {
+        "id": a1_step_prt_id,
+        "messageID": a1_msg_id,
+        "sessionID": session_id,
+        "type": "step-start",
+    }
+    a1_think_prt_doc = {
+        "id": a1_think_prt_id,
+        "messageID": a1_msg_id,
+        "sessionID": session_id,
+        "text": th1_text,
+        "type": "reasoning",
+    }
+    a1_text_prt_doc = {
+        "id": a1_text_prt_id,
+        "messageID": a1_msg_id,
+        "sessionID": session_id,
+        "text": a1_text,
+        "type": "text",
+    }
+    a1_tool_prt_doc = {
+        "callID": call1_id,
+        "id": a1_tool_prt_id,
+        "messageID": a1_msg_id,
+        "sessionID": session_id,
+        "state": {
+            "input": tool1_input,
+            "metadata": {"truncated": False},
+            "output": tr1_text,
+            "status": "completed",
+            "time": {"end": 1793437205000, "start": 1793437204100},
+            "title": "src/main.rs",
+        },
+        "tool": "read",
+        "type": "tool",
+    }
+
+    a2_msg_id = f"msg_0003_{rng.hex_id('m', 8)}"
+    a2_text_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    a2_text = rng.synth_text(168)
+    t2_fresh = 210 + rng.rand_range(0, 30)
+    t2_cw = 340
+    t2_cr = t1_fresh + t1_cw
+    t2_out_body = 118
+
+    a2_msg_doc = {
+        "agent": "build",
+        "cost": 0,
+        "finish": "stop",
+        "id": a2_msg_id,
+        "mode": "build",
+        "modelID": model_id,
+        "parentID": u1_msg_id,
+        "path": {"cwd": cwd, "root": cwd},
+        "providerID": provider_id,
+        "role": "assistant",
+        "sessionID": session_id,
+        "time": {"completed": 1793437212000, "created": 1793437206000},
+        "tokens": {
+            "cache": {"read": t2_cr, "write": t2_cw},
+            "input": t2_fresh,
+            "output": t2_out_body,
+            "reasoning": 0,
+        },
+    }
+    a2_text_prt_doc = {
+        "id": a2_text_prt_id,
+        "messageID": a2_msg_id,
+        "sessionID": session_id,
+        "text": a2_text,
+        "type": "text",
+    }
+
+    turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {
+                    "bytes": len(th1_text.encode("utf-8")),
+                    "kind": "assistant_thinking",
+                    "tool": None,
+                },
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+                {"bytes": tool1_input_bytes, "kind": "tool_use", "tool": "read"},
+            ],
+            "hints": default_hints(),
+            "model": model_id,
+            "prompt_tokens": t1_fresh + t1_cw + t1_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:00:04Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": t1_cr,
+                "cache_write": t1_cw,
+                "confidence": "measured",
+                "fresh_in": t1_fresh,
+                "output": t1_out_body + t1_reasoning,
+                "reasoning": t1_reasoning,
+            },
+        },
+        {
+            "added_blocks": [
+                {"bytes": len(tr1_text.encode("utf-8")), "kind": "tool_result", "tool": "read"},
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model_id,
+            "prompt_tokens": t2_fresh + t2_cw + t2_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:00:12Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": t2_cr,
+                "cache_write": t2_cw,
+                "confidence": "measured",
+                "fresh_in": t2_fresh,
+                "output": t2_out_body,
+                "reasoning": None,
+            },
+        },
+    ]
+
+    expected = {
+        "agent": "opencode",
+        "log_files": [session_rel],
+        "scenario": "legacy-tree",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": model_id,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    base = "opencode/legacy-tree"
+    return {
+        f"{base}/{session_rel}": dumps_pretty_json(session_doc),
+        f"{base}/storage/message/{session_id}/{u1_msg_id}.json": dumps_pretty_json(u1_msg_doc),
+        f"{base}/storage/part/{u1_msg_id}/{u1_prt_id}.json": dumps_pretty_json(u1_prt_doc),
+        f"{base}/storage/message/{session_id}/{a1_msg_id}.json": dumps_pretty_json(a1_msg_doc),
+        f"{base}/storage/part/{a1_msg_id}/{a1_step_prt_id}.json": dumps_pretty_json(
+            a1_step_prt_doc
+        ),
+        f"{base}/storage/part/{a1_msg_id}/{a1_think_prt_id}.json": dumps_pretty_json(
+            a1_think_prt_doc
+        ),
+        f"{base}/storage/part/{a1_msg_id}/{a1_text_prt_id}.json": dumps_pretty_json(
+            a1_text_prt_doc
+        ),
+        f"{base}/storage/part/{a1_msg_id}/{a1_tool_prt_id}.json": dumps_pretty_json(
+            a1_tool_prt_doc
+        ),
+        f"{base}/storage/message/{session_id}/{a2_msg_id}.json": dumps_pretty_json(a2_msg_doc),
+        f"{base}/storage/part/{a2_msg_id}/{a2_text_prt_id}.json": dumps_pretty_json(
+            a2_text_prt_doc
+        ),
+        f"{base}/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_opencode_subagent_cost(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Synthetic OpenCode primary + child subagent (`parentID`) scenario with
+    agent-reported USD `cost` and compaction marker (`T10`).
+    """
+    project_id = rng.hex_id("prj", 16)
+    parent_ses_id = f"ses_0001_{rng.hex_id('s', 12)}"
+    child_ses_id = f"ses_0002_{rng.hex_id('s', 12)}"
+    cwd = "/synthetic/workspace/opencode-beta"
+    parent_model = "claude-opus-4-5"
+    child_model = "claude-haiku-4-5"
+    provider_id = "anthropic"
+    version = "1.2.4"
+
+    parent_rel = f"storage/session/{project_id}/{parent_ses_id}.json"
+    child_rel = f"storage/session/{project_id}/{child_ses_id}.json"
+
+    parent_ses_doc = {
+        "directory": cwd,
+        "id": parent_ses_id,
+        "parentID": None,
+        "projectID": project_id,
+        "slug": "synth-opencode-parent",
+        "time": {"created": 1793440800000, "updated": 1793440815000},
+        "title": rng.synth_text(28),
+        "version": version,
+    }
+    child_ses_doc = {
+        "directory": cwd,
+        "id": child_ses_id,
+        "parentID": parent_ses_id,
+        "projectID": project_id,
+        "slug": "synth-opencode-child",
+        "time": {"created": 1793440803000, "updated": 1793440807000},
+        "title": rng.synth_text(28),
+        "version": version,
+    }
+
+    # Parent Turn 1: user prompt -> assistant invokes `task` subagent tool (`cost: 0.0425`).
+    p_u1_id = f"msg_0001_{rng.hex_id('m', 8)}"
+    p_u1_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    p_u1_text = rng.synth_text(112)
+    p_u1_doc = {
+        "agent": "build",
+        "id": p_u1_id,
+        "model": {"modelID": parent_model, "providerID": provider_id},
+        "role": "user",
+        "sessionID": parent_ses_id,
+        "time": {"created": 1793440801000},
+    }
+    p_u1_prt_doc = {
+        "id": p_u1_prt_id,
+        "messageID": p_u1_id,
+        "sessionID": parent_ses_id,
+        "text": p_u1_text,
+        "type": "text",
+    }
+
+    p_a1_id = f"msg_0002_{rng.hex_id('m', 8)}"
+    p_a1_tool_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    task_call_id = rng.hex_id("call", 12)
+    sub_prompt = rng.synth_text(88)
+    sub_result = rng.synth_text(184)
+    task_input = {"description": "Audit SQLite flags", "prompt": sub_prompt}
+    task_input_bytes = len(
+        json.dumps(task_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+
+    p1_fresh = 460 + rng.rand_range(0, 30)
+    p1_cw = 6200
+    p1_cr = 1800
+    p1_out = 86
+
+    p_a1_doc = {
+        "agent": "build",
+        "cost": 0.0425,
+        "finish": "tool-calls",
+        "id": p_a1_id,
+        "mode": "build",
+        "modelID": parent_model,
+        "parentID": p_u1_id,
+        "path": {"cwd": cwd, "root": cwd},
+        "providerID": provider_id,
+        "role": "assistant",
+        "sessionID": parent_ses_id,
+        "time": {"completed": 1793440808000, "created": 1793440802000},
+        "tokens": {
+            "cache": {"read": p1_cr, "write": p1_cw},
+            "input": p1_fresh,
+            "output": p1_out,
+            "reasoning": 0,
+        },
+    }
+    p_a1_tool_prt_doc = {
+        "callID": task_call_id,
+        "id": p_a1_tool_prt_id,
+        "messageID": p_a1_id,
+        "sessionID": parent_ses_id,
+        "state": {
+            "input": task_input,
+            "metadata": {"sessionId": child_ses_id},
+            "output": sub_result,
+            "status": "completed",
+            "time": {"end": 1793440807500, "start": 1793440802500},
+            "title": "Audit SQLite flags",
+        },
+        "tool": "task",
+        "type": "tool",
+    }
+
+    # Compaction user marker before Parent Turn 2.
+    p_u2_id = f"msg_0003_{rng.hex_id('m', 8)}"
+    p_u2_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    p_u2_doc = {
+        "agent": "build",
+        "id": p_u2_id,
+        "model": {"modelID": parent_model, "providerID": provider_id},
+        "role": "user",
+        "sessionID": parent_ses_id,
+        "time": {"created": 1793440810000},
+    }
+    p_u2_prt_doc = {
+        "auto": True,
+        "id": p_u2_prt_id,
+        "messageID": p_u2_id,
+        "sessionID": parent_ses_id,
+        "type": "compaction",
+    }
+
+    # Parent Turn 2 (`cost: 0.0185`, `compaction: True`).
+    p_a2_id = f"msg_0004_{rng.hex_id('m', 8)}"
+    p_a2_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    p_a2_text = rng.synth_text(152)
+    p2_fresh = 310 + rng.rand_range(0, 25)
+    p2_cw = 1400
+    p2_cr = 2200
+    p2_out = 108
+
+    p_a2_doc = {
+        "agent": "build",
+        "cost": 0.0185,
+        "finish": "stop",
+        "id": p_a2_id,
+        "mode": "build",
+        "modelID": parent_model,
+        "parentID": p_u2_id,
+        "path": {"cwd": cwd, "root": cwd},
+        "providerID": provider_id,
+        "role": "assistant",
+        "sessionID": parent_ses_id,
+        "summary": True,
+        "time": {"completed": 1793440815000, "created": 1793440811000},
+        "tokens": {
+            "cache": {"read": p2_cr, "write": p2_cw},
+            "input": p2_fresh,
+            "output": p2_out,
+            "reasoning": 0,
+        },
+    }
+    p_a2_prt_doc = {
+        "id": p_a2_prt_id,
+        "messageID": p_a2_id,
+        "sessionID": parent_ses_id,
+        "text": p_a2_text,
+        "type": "text",
+    }
+
+    # Child subagent session (`parentID: parent_ses_id`, `cost: 0.0125`).
+    c_u1_id = f"msg_0001_{rng.hex_id('m', 8)}"
+    c_u1_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    c_u1_doc = {
+        "agent": "general",
+        "id": c_u1_id,
+        "model": {"modelID": child_model, "providerID": provider_id},
+        "role": "user",
+        "sessionID": child_ses_id,
+        "time": {"created": 1793440803500},
+    }
+    c_u1_prt_doc = {
+        "id": c_u1_prt_id,
+        "messageID": c_u1_id,
+        "sessionID": child_ses_id,
+        "text": sub_prompt,
+        "type": "text",
+    }
+
+    c_a1_id = f"msg_0002_{rng.hex_id('m', 8)}"
+    c_a1_prt_id = f"prt_0001_{rng.hex_id('p', 8)}"
+    c1_fresh = 240 + rng.rand_range(0, 20)
+    c1_cw = 1900
+    c1_cr = 0
+    c1_out = 94
+
+    c_a1_doc = {
+        "agent": "general",
+        "cost": 0.0125,
+        "finish": "stop",
+        "id": c_a1_id,
+        "mode": "general",
+        "modelID": child_model,
+        "parentID": c_u1_id,
+        "path": {"cwd": cwd, "root": cwd},
+        "providerID": provider_id,
+        "role": "assistant",
+        "sessionID": child_ses_id,
+        "time": {"completed": 1793440807000, "created": 1793440804000},
+        "tokens": {
+            "cache": {"read": c1_cr, "write": c1_cw},
+            "input": c1_fresh,
+            "output": c1_out,
+            "reasoning": 0,
+        },
+    }
+    c_a1_prt_doc = {
+        "id": c_a1_prt_id,
+        "messageID": c_a1_id,
+        "sessionID": child_ses_id,
+        "text": sub_result,
+        "type": "text",
+    }
+
+    p2_hints = default_hints()
+    p2_hints["compaction"] = True
+    parent_turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(p_u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": task_input_bytes, "kind": "tool_use", "tool": "task"},
+            ],
+            "hints": default_hints(),
+            "model": parent_model,
+            "prompt_tokens": p1_fresh + p1_cw + p1_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:00:08Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": p1_cr,
+                "cache_write": p1_cw,
+                "confidence": "measured",
+                "fresh_in": p1_fresh,
+                "output": p1_out,
+                "reasoning": None,
+            },
+        },
+        {
+            "added_blocks": [
+                {"bytes": len(sub_result.encode("utf-8")), "kind": "tool_result", "tool": "task"},
+                {"bytes": len(p_a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": p2_hints,
+            "model": parent_model,
+            "prompt_tokens": p2_fresh + p2_cw + p2_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:00:15Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": p2_cr,
+                "cache_write": p2_cw,
+                "confidence": "measured",
+                "fresh_in": p2_fresh,
+                "output": p2_out,
+                "reasoning": None,
+            },
+        },
+    ]
+
+    c1_hints = default_hints()
+    c1_hints["sidechain"] = True
+    child_turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(sub_prompt.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(sub_result.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": c1_hints,
+            "model": child_model,
+            "prompt_tokens": c1_fresh + c1_cw + c1_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T10:00:07Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": c1_cr,
+                "cache_write": c1_cw,
+                "confidence": "measured",
+                "fresh_in": c1_fresh,
+                "output": c1_out,
+                "reasoning": None,
+            },
+        }
+    ]
+
+    expected = {
+        "agent": "opencode",
+        "log_files": [parent_rel, child_rel],
+        "scenario": "subagent-cost",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": parent_model,
+                "session_id": parent_ses_id,
+                "totals": compute_session_totals(parent_turns_gt),
+                "turns": parent_turns_gt,
+            },
+            {
+                "ignored_records": 0,
+                "model": child_model,
+                "session_id": child_ses_id,
+                "totals": compute_session_totals(child_turns_gt),
+                "turns": child_turns_gt,
+            },
+        ],
+    }
+
+    base = "opencode/subagent-cost"
+    return {
+        f"{base}/{parent_rel}": dumps_pretty_json(parent_ses_doc),
+        f"{base}/{child_rel}": dumps_pretty_json(child_ses_doc),
+        f"{base}/storage/message/{parent_ses_id}/{p_u1_id}.json": dumps_pretty_json(p_u1_doc),
+        f"{base}/storage/part/{p_u1_id}/{p_u1_prt_id}.json": dumps_pretty_json(p_u1_prt_doc),
+        f"{base}/storage/message/{parent_ses_id}/{p_a1_id}.json": dumps_pretty_json(p_a1_doc),
+        f"{base}/storage/part/{p_a1_id}/{p_a1_tool_prt_id}.json": dumps_pretty_json(
+            p_a1_tool_prt_doc
+        ),
+        f"{base}/storage/message/{parent_ses_id}/{p_u2_id}.json": dumps_pretty_json(p_u2_doc),
+        f"{base}/storage/part/{p_u2_id}/{p_u2_prt_id}.json": dumps_pretty_json(p_u2_prt_doc),
+        f"{base}/storage/message/{parent_ses_id}/{p_a2_id}.json": dumps_pretty_json(p_a2_doc),
+        f"{base}/storage/part/{p_a2_id}/{p_a2_prt_id}.json": dumps_pretty_json(p_a2_prt_doc),
+        f"{base}/storage/message/{child_ses_id}/{c_u1_id}.json": dumps_pretty_json(c_u1_doc),
+        f"{base}/storage/part/{c_u1_id}/{c_u1_prt_id}.json": dumps_pretty_json(c_u1_prt_doc),
+        f"{base}/storage/message/{child_ses_id}/{c_a1_id}.json": dumps_pretty_json(c_a1_doc),
+        f"{base}/storage/part/{c_a1_id}/{c_a1_prt_id}.json": dumps_pretty_json(c_a1_prt_doc),
+        f"{base}/expected.json": dumps_pretty_json(expected),
+    }
+
+
 def generate_all(seed: int) -> dict[str, bytes]:
     rng = SplitMix64(seed)
     files: dict[str, bytes] = {}
@@ -2447,6 +3497,10 @@ def generate_all(seed: int) -> dict[str, bytes]:
         gen_claude_cache_miss_storm,
         gen_claude_heavy_overhead,
         gen_litellm_pricing_tiny,
+        gen_gemini_rewind_patch,
+        gen_gemini_legacy_json,
+        gen_opencode_legacy_tree,
+        gen_opencode_subagent_cost,
     ):
         # Derive an independent deterministic sub-seed per scenario so adding new
         # scenarios in later tasks never shifts existing scenario bytes!

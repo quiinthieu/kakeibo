@@ -17,10 +17,23 @@ const REQUIRED_SCENARIOS: &[(&str, &str)] = &[
     ("codex", "codex-dual-usage"),
 ];
 
+const T10_SCENARIOS: &[(&str, &str)] = &[
+    ("gemini-cli", "rewind-patch"),
+    ("gemini-cli", "legacy-json"),
+    ("opencode", "legacy-tree"),
+    ("opencode", "subagent-cost"),
+];
+
 const OPAQUE_MAP_PREFIXES: &[&str] = &[
     "message.content[].input.",
     "snapshot.trackedFileBackups.",
     "payload.state.",
+    "projects.",
+    "toolCalls[].args.",
+    "$patch.toolCalls[].args.",
+    "messages[].toolCalls[].args.",
+    "state.input.",
+    "state.metadata.",
 ];
 
 fn collect_relative_files(base: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
@@ -208,6 +221,8 @@ fn every_used_fixture_field_cites_a_source_in_format_docs() {
     let agent_docs = [
         ("claude-code", root.join("docs/formats/claude-code.md")),
         ("codex", root.join("docs/formats/codex.md")),
+        ("gemini-cli", root.join("docs/formats/gemini-cli.md")),
+        ("opencode", root.join("docs/formats/opencode.md")),
     ];
 
     for (agent, doc_path) in agent_docs {
@@ -216,31 +231,48 @@ fn every_used_fixture_field_cites_a_source_in_format_docs() {
         let files = collect_relative_files(&agent_fixtures_dir);
 
         let mut used_fields = BTreeSet::new();
-        let mut jsonl_count = 0usize;
+        let mut fixture_count = 0usize;
 
         for (rel, bytes) in &files {
-            if rel.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            if rel.file_name().and_then(|s| s.to_str()) == Some("expected.json") {
                 continue;
             }
-            jsonl_count += 1;
-            let text = std::str::from_utf8(bytes).expect("UTF-8 synthetic jsonl");
-            for (line_idx, line) in text.lines().enumerate() {
-                if line.trim().is_empty() {
-                    continue;
+            match rel.extension().and_then(|s| s.to_str()) {
+                Some("jsonl") => {
+                    fixture_count += 1;
+                    let text = std::str::from_utf8(bytes).expect("UTF-8 synthetic jsonl");
+                    for (line_idx, line) in text.lines().enumerate() {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        let val: serde_json::Value =
+                            serde_json::from_str(line).unwrap_or_else(|e| {
+                                panic!(
+                                    "invalid JSON in {}/{}:{} -> {e}",
+                                    agent,
+                                    rel.display(),
+                                    line_idx + 1
+                                )
+                            });
+                        collect_json_field_paths(&val, "", &mut used_fields);
+                    }
                 }
-                let val: serde_json::Value = serde_json::from_str(line).unwrap_or_else(|e| {
-                    panic!(
-                        "invalid JSON in {}/{}:{} -> {e}",
-                        agent,
-                        rel.display(),
-                        line_idx + 1
-                    )
-                });
-                collect_json_field_paths(&val, "", &mut used_fields);
+                Some("json") => {
+                    fixture_count += 1;
+                    let val: serde_json::Value =
+                        serde_json::from_slice(bytes).unwrap_or_else(|e| {
+                            panic!("invalid JSON in {}/{} -> {e}", agent, rel.display())
+                        });
+                    collect_json_field_paths(&val, "", &mut used_fields);
+                }
+                _ => {}
             }
         }
 
-        assert!(jsonl_count >= 2, "expected >= 2 JSONL fixtures for {agent}");
+        assert!(
+            fixture_count >= 2,
+            "expected >= 2 JSON/JSONL fixtures for {agent}"
+        );
         let uncited: Vec<&String> = used_fields
             .iter()
             .filter(|f| !cited_fields.contains(*f))
@@ -267,7 +299,7 @@ fn ground_truth_normalisation_invariants_and_fixture_lint_hold() {
         String::from_utf8_lossy(&lint_out.stderr)
     );
 
-    for (agent, scenario) in REQUIRED_SCENARIOS {
+    for (agent, scenario) in REQUIRED_SCENARIOS.iter().chain(T10_SCENARIOS.iter()) {
         let scenario_dir = root.join("tests/fixtures").join(agent).join(scenario);
         let raw = fs::read_to_string(scenario_dir.join("expected.json"))
             .unwrap_or_else(|e| panic!("missing expected.json for {agent}/{scenario}: {e}"));
@@ -346,11 +378,23 @@ fn test_env_isolates_home_and_enforces_readonly_guard() {
 
     let (staged_claude, claude_gt) = env.stage_fixture("claude-code", "basic");
     let (staged_codex, codex_gt) = env.stage_fixture("codex", "codex-dual-usage");
+    let (staged_gemini, gemini_gt) = env.stage_fixture("gemini-cli", "rewind-patch");
+    let (staged_opencode, opencode_gt) = env.stage_fixture("opencode", "legacy-tree");
     assert_eq!(claude_gt.agent, "claude-code");
     assert_eq!(codex_gt.agent, "codex");
+    assert_eq!(gemini_gt.agent, "gemini-cli");
+    assert_eq!(opencode_gt.agent, "opencode");
 
-    for path in staged_claude.iter().chain(staged_codex.iter()) {
+    for path in staged_claude
+        .iter()
+        .chain(staged_codex.iter())
+        .chain(staged_gemini.iter())
+    {
         assert!(path.starts_with(env.home_dir()));
+        assert!(path.is_file());
+    }
+    for path in &staged_opencode {
+        assert!(path.starts_with(env.data_dir()));
         assert!(path.is_file());
     }
 
@@ -360,6 +404,13 @@ fn test_env_isolates_home_and_enforces_readonly_guard() {
         assert!(
             write_attempt.is_err(),
             "staged agent log must reject write opens while ReadOnlyGuard is active"
+        );
+        let write_opencode_attempt = fs::OpenOptions::new()
+            .append(true)
+            .open(&staged_opencode[0]);
+        assert!(
+            write_opencode_attempt.is_err(),
+            "staged opencode log must reject write opens while ReadOnlyGuard is active"
         );
 
         let cli_out = env
