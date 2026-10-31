@@ -24,11 +24,13 @@
 
 ## Observed Top-Level `type` Values (`0.165.0`)
 
-- `session_meta` — Session header with `session_id`, `cwd`, `cli_version`, `parent_thread_id`, and `source` [S1], [S2], [S4].
+- `session_meta` — Session header with `session_id`, `cwd`, `cli_version`, `parent_thread_id`, `forked_from_id`, `subagent_history_start_ordinal`, and `source` [S1], [S2], [S4].
 - `turn_context` — Per-turn active model, `turn_id`, `cwd`, `effort`, and sandbox settings [S1], [S2], [S4].
-- `response_item` — Conversation and tool items (`payload.type` in `message`, `reasoning`, `function_call`, `function_call_output`, `custom_tool_call`, `custom_tool_call_output`, `additional_tools`) [S1], [S2], [S4].
-- `event_msg` — Runtime events (`payload.type == "token_count"` carries usage and `rate_limits`; other observed `payload.type` values `task_started`, `task_complete`, `item_completed`, `thread_settings_applied` are skipped cleanly) [S1], [S2], [S3].
-- `token_usage_record` — Per-API-response usage record with `response_id`, `usage`, `turn_token_usage`, and `thread_token_usage` (**emitted alongside `event_msg/token_count` in `0.165.0`**) [S1], [S4].
+- `response_item` — Conversation and tool items (`payload.type` in `message`, `reasoning`, `function_call`, `function_call_output`, `custom_tool_call`, `custom_tool_call_output`, `compaction`, `web_search_call`, `tool_search_call`, `tool_search_output`, `agent_message`, `additional_tools`) [S1], [S2], [S4].
+- `event_msg` — Runtime events (`payload.type == "token_count"` carries usage and `rate_limits`; `payload.type == "context_compacted"` marks compaction; `payload.type` in `"error"`, `"stream_error"` marks API errors; other observed `payload.type` values `task_started`, `task_complete`, `item_completed`, `thread_settings_applied`, `agent_message`, `agent_reasoning`, `user_message`, `mcp_tool_call_end`, `patch_apply_end`, `sub_agent_activity`, `thread_goal_updated`, `turn_aborted`, `web_search_end` are counted and skipped cleanly) [S1], [S2], [S3].
+- `token_usage_record` — Per-API-response usage record with `response_id`, `usage`, `turn_token_usage`, and `thread_token_usage` (**emitted alongside `event_msg/token_count` in `0.165.0` in both `tur -> tc` and `tc -> tur` orders**) [S1], [S4].
+- `compacted` — Context window compaction checkpoint (marks `TurnHints.compaction = true` on the next turn; internal replacement/retained history payloads dropped immediately) [S1].
+- `inter_agent_communication_metadata` — Multi-agent coordination metadata (non-turn record; counted and skipped cleanly) [S1].
 - `world_state` — Internal environment/instruction state snapshot (non-turn record; counted and skipped cleanly) [S1].
 
 ## Field Reference (Every Used Field Cites a Source)
@@ -48,8 +50,10 @@ Children inside opaque state snapshots (`payload.state.*`) are skipped without r
 | `payload.originator` | `string` | Client identifier on `session_meta` (e.g. `"codex_cli_rs"`). | [S1], [S2] |
 | `payload.cli_version` | `string` | Codex CLI version string on `session_meta`. | [S1], [S2] |
 | `payload.model_provider` | `string` | Model provider slug on `session_meta` (e.g. `"openai"`). | [S1], [S2] |
-| `payload.source` | `string \| object` | Session origin (`"cli"` or `{"subagent": ...}`) on `session_meta`. | [S1], [S4] |
-| `payload.parent_thread_id` | `string \| null` | Parent thread UUID when session was forked or spawned from another thread. | [S1], [S4] |
+| `payload.source` | `string \| object` | Session origin (`"cli"`, `"vscode"`, or `{"subagent": ...}`) on `session_meta` (`"subagent"` sets `TurnHints.sidechain = true`). | [S1], [S4] |
+| `payload.parent_thread_id` | `string \| null` | Parent thread UUID when session was forked or spawned from another thread (`TurnRecord.parent_session_id`). | [S1], [S4] |
+| `payload.forked_from_id` | `string \| null` | Explicit source thread UUID on forked sessions (`TurnRecord.parent_session_id`, sets `TurnHints.resume_start = true`). | [S1] |
+| `payload.subagent_history_start_ordinal` | `integer` | Zero-based ordinal cutoff on `session_meta`; `response_item`s with `ordinal < subagent_history_start_ordinal` are inherited parent history. | [S1] |
 | `payload.turn_id` | `string` | Logical turn identifier on `turn_context` and `token_usage_record`. | [S1], [S4] |
 | `payload.root_turn_id` | `string` | Root turn identifier on `turn_context` and `token_usage_record`. | [S1] |
 | `payload.model` | `string` | Active model identifier on `turn_context` (e.g. `"gpt-5-codex"`). | [S1], [S2], [S4] |
@@ -70,6 +74,10 @@ Children inside opaque state snapshots (`payload.state.*`) are skipped without r
 | `payload.output` | `string \| array` | Tool result string on `function_call_output` or content array on `custom_tool_call_output` (measured and dropped). | [S1], [S2], [S4] |
 | `payload.output[].type` | `string` | `"input_text"` on `custom_tool_call_output` items. | [S1] |
 | `payload.output[].text` | `string` | Tool result text on `custom_tool_call_output` items (measured and dropped). | [S1] |
+| `payload.action` | `object` | Structured search query action on `response_item/web_search_call` (canonical JSON measured/hashed, text dropped). | [S1] |
+| `payload.tools` | `array` | Discovered tool definitions on `response_item/tool_search_output` (canonical JSON measured, text dropped). | [S1] |
+| `payload.author` | `string` | Sender agent role on `response_item/agent_message` (dropped). | [S1] |
+| `payload.recipient` | `string` | Recipient agent role on `response_item/agent_message` (dropped). | [S1] |
 | `payload.info` | `object \| null` | Token usage container on `event_msg` (`payload.type == "token_count"`). | [S1], [S2], [S3] |
 | `payload.info.model_context_window` | `integer` | Agent-reported model context window size in tokens. | [S1], [S2], [S3] |
 | `payload.info.last_token_usage` | `object` | Per-request token counts for the most recent API call on `event_msg/token_count`. | [S1], [S2], [S3] |
@@ -130,6 +138,9 @@ Children inside opaque state snapshots (`payload.state.*`) are skipped without r
    - Total prompt `P = fresh_in + cache_write + cache_read == input_tokens` (cached tokens are **never** added on top of `input_tokens`).
    - `output = output_tokens`, `reasoning = Some(reasoning_output_tokens)` (note: `reasoning_output_tokens <= output_tokens`, and `total_tokens == input_tokens + output_tokens`).
 2. **Dual-usage deduplication (`codex-dual-usage`)** ([S1], [S3], [S4]):
-   - `codex-cli 0.165.0` emits **both** `token_usage_record` (keyed by `response_id`, carrying `payload.usage`) and `event_msg` (`payload.type == "token_count"`, carrying `last_token_usage`, `total_token_usage`, and `rate_limits`) for every API call.
-   - **Precedence rule:** When a rollout contains `token_usage_record`, use `token_usage_record` (deduplicated by `response_id`) as the authoritative token source and extract **only** `rate_limits` from adjacent `event_msg/token_count` lines — **never** sum both!
-   - **Fallback for older rollouts without `token_usage_record`:** Use `event_msg/token_count` (`last_token_usage` when present, deduplicating identical consecutive `total_token_usage` snapshots; or deltas of monotonic `total_token_usage` when `last_token_usage` is omitted).
+   - `codex-cli 0.165.0` emits **both** `token_usage_record` (keyed by `response_id`, carrying `payload.usage`) and `event_msg` (`payload.type == "token_count"`, carrying `last_token_usage`, `total_token_usage`, `model_context_window`, and `rate_limits`) for every API call — observed in both `token_usage_record -> token_count` (`1,784` pairs) and `token_count -> token_usage_record` (`37` pairs) orders with zero intervening `response_item`s.
+   - **Precedence rule:** When a rollout contains `token_usage_record`, use `token_usage_record` (deduplicated by `response_id`) as the authoritative token source and merge `rate_limits` / `model_context_window` from its paired adjacent `event_msg/token_count` — **never** sum or emit both!
+   - **Fallback for older rollouts without `token_usage_record`:** Use `event_msg/token_count` (`last_token_usage` when present, suppressing consecutive duplicate `total_token_usage` snapshots; or per-field deltas of monotonic `total_token_usage` when `last_token_usage` is omitted).
+3. **Fork & subagent inherited history** ([S1], [S4]):
+   - Across `60` verified forked/subagent `0.165.0` rollouts (`forked_from_id` or `parent_thread_id` set), replayed parent `response_item`s appear prior to the child's first `turn_context` (and at `ordinal < subagent_history_start_ordinal` when present), with zero usage events before the first `turn_context`.
+   - Parsers index tool `call_id`s from replayed parent items so cross-boundary tool outputs resolve tool names, but exclude replayed parent `response_item`s from the child's Turn 1 `added` blocks.
