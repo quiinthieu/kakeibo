@@ -199,7 +199,7 @@ Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claud
 ### M1 MVP: Claude Code + Codex autopsy in the terminal
 - [x] **T03 Core model & ledger.** §4 types, normalisation for both conventions, `ledger-schema.md`, NDJSON I/O.
   *AC:* round-trip tests; `fresh+write+read == P` property for both conventions.
-- [ ] **T04 Claude Code parser.** Discovery, streaming, dedupe (max output), block sizing with text dropped, tool names/`key_hash`, resume/compaction/sidechain hints *(verify)*.
+- [x] **T04 Claude Code parser.** Discovery, streaming, dedupe (max output), block sizing with text dropped, tool names/`key_hash`, resume/compaction/sidechain hints *(verify)*.
   *AC:* `basic`/`streaming-dupes` match `expected.json` exactly; `hostile` → diagnostics, no panic; privacy grep clean.
 - [ ] **T05 Codex parser.** Rollouts (+ archived, `CODEX_HOME`), `session_meta`/`turn_context`, usage precedence, fork history, `rate_limits`.
   *AC:* `codex-dual-usage` not double counted; cumulative-only fixture gives correct deltas; cached never added to input.

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Claude Code streaming JSONL parser (`kakeibo-parse::claude`) with `(message.id, requestId)` consolidation (`max(output_tokens)`), event-UUID and block-fingerprint deduplication, immediate raw-text dropping, canonical tool-input hashing (`key_hash`), and verified `resume_start`, `compaction`, `sidechain`, and `api_error` hints (T04).
+- Read-only Claude Code log discovery (`PathCatalog::discover_claude_top_level` and `discover_claude_subagents` with `CLAUDE_CONFIG_DIR` override) and `memchr`-backed 16 MiB `BoundedLineReader` emitting structured `ParseDiagnostics` on oversized, non-UTF-8, malformed, or truncated lines (T04).
+- Verified `Claude Code 2.1.314` compaction (`compact_boundary`, `isCompactSummary`), resume (`away_summary`, root-parent reset, fork switch), API-error (`isApiErrorMessage`), and `<session>/subagents/*.jsonl` schema documentation in `docs/formats/claude-code.md` (T04).
 - Pure domain model in `kakeibo-core` (`TurnRecord`, `Usage`, `ContentBlock`, `TurnHints`, `Category`, `Confidence`, `AgentId`, `BlockKind`, and UTC-normalised `Timestamp` backed by `time` per ADR 001) (T03).
 - Dual-convention token-usage normalisation (`Usage::from_disjoint`, `Usage::from_inclusive_checked`, `Usage::from_inclusive_clamped`) with `proptest` verification of `fresh_in + cache_write + cache_read == P` across both conventions (T03).
 - `kakeibo.ledger/1` NDJSON specification (`docs/ledger-schema.md`), pure in-memory codec (`kakeibo-core::ledger`), and bounded-memory streaming `BufRead`/`Write` NDJSON reader/writer (`kakeibo-report::ndjson`) with round-trip and golden snapshot tests (T03).
