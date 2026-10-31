@@ -1,0 +1,42 @@
+# Root-cause flag thresholds (`PLAN.md` §0 #7, §6.3).
+# Thresholds are tunable calibration defaults; every section records `source` and `checked`.
+
+schema_version = 1
+
+[cold_resume]
+# Anthropic ephemeral prompt cache default TTL is 5 minutes (300 seconds).
+cache_ttl_seconds = 300
+min_cache_write_pct = 70
+min_prompt_tokens = 64_000
+reference_url = "https://github.com/anthropics/claude-code/issues/100447"
+source = "https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching"
+checked = "2026-10-31"
+
+[near_full_context]
+min_window_pct = 85
+min_requests = 3
+source = "calibration-default (PLAN.md §6.3)"
+checked = "2026-10-31"
+
+[tool_output_bloat]
+min_tool_tokens = 8_000
+min_carried_turns = 3
+source = "calibration-default (PLAN.md §6.3)"
+checked = "2026-10-31"
+
+[cache_miss_storm]
+min_requests = 3
+min_prompt_tokens = 8_000
+min_write_tokens = 4_000
+write_to_read_ratio = 2
+max_gap_seconds = 300
+source = "https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching"
+checked = "2026-10-31"
+
+[heavy_overhead]
+max_first_prompt_tokens = 30_000
+median_multiplier_pct = 150
+min_median_floor_tokens = 16_000
+remediation_hint = "try `bentoctx budget`"
+source = "calibration-default (PLAN.md §6.3, §11)"
+checked = "2026-10-31"

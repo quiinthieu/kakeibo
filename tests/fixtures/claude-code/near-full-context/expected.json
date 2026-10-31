@@ -1,0 +1,192 @@
+{
+  "agent": "claude-code",
+  "log_files": [
+    "projects/-synthetic-workspace-nearfull/session-near-full-0001.jsonl"
+  ],
+  "scenario": "near-full-context",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "claude-sonnet-4-5",
+      "session_id": "c81e7327-cf51-4b2a-b532-48740938d772",
+      "totals": {
+        "cache_read": 548385,
+        "cache_write": 190000,
+        "fresh_in": 205,
+        "output": 230,
+        "prompt_tokens": 738590,
+        "reasoning": 0,
+        "turns": 5
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 120,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 14030,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 14000,
+            "confidence": "measured",
+            "fresh_in": 30,
+            "output": 40,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 632000,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 200,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 172070,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:15Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 14030,
+            "cache_write": 158000,
+            "confidence": "measured",
+            "fresh_in": 40,
+            "output": 50,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 24000,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 180,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 178120,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:25Z",
+          "turn": 3,
+          "usage": {
+            "cache_read": 172070,
+            "cache_write": 6000,
+            "confidence": "measured",
+            "fresh_in": 50,
+            "output": 45,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 24000,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 184165,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:35Z",
+          "turn": 4,
+          "usage": {
+            "cache_read": 178120,
+            "cache_write": 6000,
+            "confidence": "measured",
+            "fresh_in": 45,
+            "output": 40,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 24000,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 220,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 190205,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:45Z",
+          "turn": 5,
+          "usage": {
+            "cache_read": 184165,
+            "cache_write": 6000,
+            "confidence": "measured",
+            "fresh_in": 40,
+            "output": 55,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

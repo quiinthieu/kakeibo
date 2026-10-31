@@ -2,6 +2,8 @@
 //!
 //! Guarantees tests never read from or write to the host user's `$HOME`.
 
+#![allow(dead_code)]
+
 use assert_cmd::Command;
 use serde::{Deserialize, Serialize};
 use std::fs;

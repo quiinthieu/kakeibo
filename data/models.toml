@@ -1,0 +1,26 @@
+# Verified model context windows (`PLAN.md` §0 #7, §6.2, §6.3).
+# Every entry records a primary vendor documentation `source` URL and `checked` date.
+# Per-turn `TurnHints.context_window_override` (when logged directly by the agent,
+# such as Codex CLI's 272,000 input cap) takes precedence over this catalog.
+
+schema_version = 1
+
+[models."claude-sonnet-4-5"]
+context_window_tokens = 200_000
+source = "https://docs.anthropic.com/en/docs/build-with-claude/context-windows"
+checked = "2026-10-31"
+
+[models."claude-opus-4-5"]
+context_window_tokens = 200_000
+source = "https://docs.anthropic.com/en/docs/build-with-claude/context-windows"
+checked = "2026-10-31"
+
+[models."claude-haiku-4-5"]
+context_window_tokens = 200_000
+source = "https://docs.anthropic.com/en/docs/build-with-claude/context-windows"
+checked = "2026-10-31"
+
+[models."gpt-5-codex"]
+context_window_tokens = 400_000
+source = "https://platform.openai.com/docs/models/gpt-5-codex"
+checked = "2026-10-31"

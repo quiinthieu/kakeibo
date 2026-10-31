@@ -1,0 +1,192 @@
+{
+  "agent": "claude-code",
+  "log_files": [
+    "projects/-synthetic-workspace-storm/session-cache-miss-storm-0001.jsonl"
+  ],
+  "scenario": "cache-miss-storm",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "claude-sonnet-4-5",
+      "session_id": "001dcf1b-277a-4c18-bf6a-03ddcc9b51e2",
+      "totals": {
+        "cache_read": 15290,
+        "cache_write": 60530,
+        "fresh_in": 180,
+        "output": 230,
+        "prompt_tokens": 76000,
+        "reasoning": 0,
+        "turns": 5
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 120,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 15030,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T12:00:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 15000,
+            "confidence": "measured",
+            "fresh_in": 30,
+            "output": 40,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 160,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 200,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-opus-4-5",
+          "prompt_tokens": 15110,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T12:00:12Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 15070,
+            "confidence": "measured",
+            "fresh_in": 40,
+            "output": 50,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 160,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 200,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 15200,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T12:00:20Z",
+          "turn": 3,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 15160,
+            "confidence": "measured",
+            "fresh_in": 40,
+            "output": 50,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 160,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 200,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-opus-4-5",
+          "prompt_tokens": 15290,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T12:00:28Z",
+          "turn": 4,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 15250,
+            "confidence": "measured",
+            "fresh_in": 40,
+            "output": 50,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 120,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 160,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-opus-4-5",
+          "prompt_tokens": 15370,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T12:00:36Z",
+          "turn": 5,
+          "usage": {
+            "cache_read": 15290,
+            "cache_write": 50,
+            "confidence": "measured",
+            "fresh_in": 30,
+            "output": 40,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}
