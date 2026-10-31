@@ -794,7 +794,7 @@ pub fn attribute_session_with_subagents(
 
         // Route prompt segment splits to categories and update `carried_blocks`.
         let mut turn_categories = CategoryBreakdown::new();
-        for (seg, split) in active_segments.iter().zip(seg_splits.into_iter()) {
+        for (seg, split) in active_segments.iter().zip(seg_splits) {
             match seg.source {
                 SegmentSource::FixedOverhead => {
                     turn_categories.add(Category::FixedOverhead, split);
