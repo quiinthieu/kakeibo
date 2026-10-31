@@ -227,10 +227,9 @@ fn parse_tokens_summary_line(after_prefix: &str) -> Option<ParsedTokensSummary> 
             cache_write = parse_aider_token_count(num)?;
         } else if let Some(num) = clause.strip_suffix(" cache hit") {
             cache_read = parse_aider_token_count(num)?;
-        } else if let Some(num) = clause.strip_suffix(" received") {
-            received = Some(parse_aider_token_count(num)?);
         } else {
-            return None;
+            let num = clause.strip_suffix(" received")?;
+            received = Some(parse_aider_token_count(num)?);
         }
     }
 
