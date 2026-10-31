@@ -95,10 +95,10 @@ pub fn hash_block_content(tag: &str, content: &str) -> [u8; 8] {
     out
 }
 
-/// Provisional byte-to-token block estimator prior to T06's Estimator ADR.
+/// Deterministic byte-to-token block pre-estimator (`ADR 002`).
 #[must_use]
 pub const fn estimate_tokens(bytes: u64) -> u64 {
-    bytes.div_ceil(4)
+    kakeibo_core::attrib::estimate_tokens_from_bytes(bytes)
 }
 
 /// Measures the canonical compact UTF-8 byte length of a JSON value without retaining it.

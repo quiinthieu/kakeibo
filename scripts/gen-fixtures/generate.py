@@ -1478,6 +1478,352 @@ def gen_codex_dual_usage(rng: SplitMix64, seed: int) -> dict[str, bytes]:
     }
 
 
+def gen_claude_tool_bloat(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """5-turn Claude Code session ingesting a 160 KB (40,000-token) Bash tool_result
+    on Turn 2 and carrying it across Turns 3 (cache_read), 4 (cold cache_write miss),
+    and 5 (cache_read) -> exact hand-computed carried cost = 120,000 prompt tokens
+    (80,000 cache_read + 40,000 cache_write; lifetime = 160,000).
+    """
+    session_id = rng.uuid_str()
+    cwd = "/synthetic/workspace/bloat"
+    log_rel = "projects/-synthetic-workspace-bloat/session-tool-bloat-0001.jsonl"
+    model = "claude-sonnet-4-5"
+    version = "2.1.314"
+
+    records: list[dict[str, Any]] = []
+    turns_gt: list[dict[str, Any]] = []
+
+    def push_user_text(
+        parent_uuid: str | None, ts: str, byte_len: int
+    ) -> tuple[str, str]:
+        u_uuid = rng.uuid_str()
+        u_text = rng.synth_text(byte_len)
+        records.append(
+            {
+                "cwd": cwd,
+                "gitBranch": "task/synth-bloat",
+                "isMeta": False,
+                "isSidechain": False,
+                "message": {"content": u_text, "role": "user"},
+                "parentUuid": parent_uuid,
+                "sessionId": session_id,
+                "timestamp": ts,
+                "type": "user",
+                "userType": "external",
+                "uuid": u_uuid,
+                "version": version,
+            }
+        )
+        return u_uuid, u_text
+
+    def push_assistant_text(
+        parent_uuid: str,
+        ts: str,
+        byte_len: int,
+        fresh_in: int,
+        cache_write: int,
+        cache_read: int,
+        output: int,
+    ) -> tuple[str, str]:
+        a_uuid = rng.uuid_str()
+        a_msg_id = rng.hex_id("msg", 16)
+        a_req_id = rng.hex_id("req", 16)
+        a_text = rng.synth_text(byte_len)
+        records.append(
+            {
+                "cwd": cwd,
+                "gitBranch": "task/synth-bloat",
+                "isSidechain": False,
+                "message": {
+                    "content": [{"text": a_text, "type": "text"}],
+                    "id": a_msg_id,
+                    "model": model,
+                    "role": "assistant",
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "type": "message",
+                    "usage": {
+                        "cache_creation": {
+                            "ephemeral_1h_input_tokens": 0,
+                            "ephemeral_5m_input_tokens": cache_write,
+                        },
+                        "cache_creation_input_tokens": cache_write,
+                        "cache_read_input_tokens": cache_read,
+                        "input_tokens": fresh_in,
+                        "output_tokens": output,
+                        "service_tier": "standard",
+                    },
+                },
+                "parentUuid": parent_uuid,
+                "requestId": a_req_id,
+                "sessionId": session_id,
+                "timestamp": ts,
+                "type": "assistant",
+                "userType": "external",
+                "uuid": a_uuid,
+                "version": version,
+            }
+        )
+        return a_uuid, a_text
+
+    # Turn 1: P(1) = 10,020 (FixedOverhead = 10,000 cache_write, u1 = 20 fresh_in).
+    # Assistant emits 120B text (30 est_tokens) + 80B Bash tool_use (20 est_tokens).
+    u1_uuid, u1_text = push_user_text(None, "2026-10-31T09:10:01Z", 80)
+    a1_uuid = rng.uuid_str()
+    a1_msg_id = rng.hex_id("msg", 16)
+    a1_req_id = rng.hex_id("req", 16)
+    a1_text = rng.synth_text(120)
+    tool1_id = rng.hex_id("toolu", 16)
+    tool1_input = {
+        "command": "cat /synthetic/workspace/bloat/build.log",
+        "description": "Read logs",
+    }
+    tool1_input_bytes = len(
+        json.dumps(tool1_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    assert tool1_input_bytes == 80
+
+    t1_fresh, t1_cw, t1_cr, t1_out = 20, 10000, 0, 50
+    records.append(
+        {
+            "cwd": cwd,
+            "gitBranch": "task/synth-bloat",
+            "isSidechain": False,
+            "message": {
+                "content": [
+                    {"text": a1_text, "type": "text"},
+                    {
+                        "id": tool1_id,
+                        "input": tool1_input,
+                        "name": "Bash",
+                        "type": "tool_use",
+                    },
+                ],
+                "id": a1_msg_id,
+                "model": model,
+                "role": "assistant",
+                "stop_reason": "tool_use",
+                "stop_sequence": None,
+                "type": "message",
+                "usage": {
+                    "cache_creation": {
+                        "ephemeral_1h_input_tokens": 0,
+                        "ephemeral_5m_input_tokens": t1_cw,
+                    },
+                    "cache_creation_input_tokens": t1_cw,
+                    "cache_read_input_tokens": t1_cr,
+                    "input_tokens": t1_fresh,
+                    "output_tokens": t1_out,
+                    "service_tier": "standard",
+                },
+            },
+            "parentUuid": u1_uuid,
+            "requestId": a1_req_id,
+            "sessionId": session_id,
+            "timestamp": "2026-10-31T09:10:04Z",
+            "type": "assistant",
+            "userType": "external",
+            "uuid": a1_uuid,
+            "version": version,
+        }
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+                {"bytes": tool1_input_bytes, "kind": "tool_use", "tool": "Bash"},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t1_fresh + t1_cw + t1_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:10:04Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": t1_cr,
+                "cache_write": t1_cw,
+                "confidence": "measured",
+                "fresh_in": t1_fresh,
+                "output": t1_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Turn 2: 160,000-byte (40,000 est_tokens) Bash tool_result enters prompt alongside
+    # Turn 1's assistant_text (30) + tool_use (20) => delta P(2) = 40,050 cache_write.
+    u2_uuid = rng.uuid_str()
+    tr1_bloat_text = rng.synth_text(160000)
+    records.append(
+        {
+            "cwd": cwd,
+            "gitBranch": "task/synth-bloat",
+            "isMeta": False,
+            "isSidechain": False,
+            "message": {
+                "content": [
+                    {
+                        "content": tr1_bloat_text,
+                        "is_error": False,
+                        "tool_use_id": tool1_id,
+                        "type": "tool_result",
+                    }
+                ],
+                "role": "user",
+            },
+            "parentUuid": a1_uuid,
+            "sessionId": session_id,
+            "sourceToolUseID": tool1_id,
+            "timestamp": "2026-10-31T09:10:06Z",
+            "type": "user",
+            "userType": "external",
+            "uuid": u2_uuid,
+            "version": version,
+        }
+    )
+    t2_fresh, t2_cw, t2_cr, t2_out = 0, 40050, 10020, 20
+    a2_uuid, a2_text = push_assistant_text(
+        u2_uuid, "2026-10-31T09:10:12Z", 80, t2_fresh, t2_cw, t2_cr, t2_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {
+                    "bytes": len(tr1_bloat_text.encode("utf-8")),
+                    "kind": "tool_result",
+                    "tool": "Bash",
+                },
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t2_fresh + t2_cw + t2_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:10:12Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": t2_cr,
+                "cache_write": t2_cw,
+                "confidence": "measured",
+                "fresh_in": t2_fresh,
+                "output": t2_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Turn 3 (carry #1): warm cache_read = 50,070 (carries 40,000 cache_read for Bash tool_result).
+    u3_uuid, u3_text = push_user_text(a2_uuid, "2026-10-31T09:10:16Z", 120)
+    t3_fresh, t3_cw, t3_cr, t3_out = 20, 30, 50070, 20
+    a3_uuid, a3_text = push_assistant_text(
+        u3_uuid, "2026-10-31T09:10:20Z", 80, t3_fresh, t3_cw, t3_cr, t3_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u3_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a3_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t3_fresh + t3_cw + t3_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:10:20Z",
+            "turn": 3,
+            "usage": {
+                "cache_read": t3_cr,
+                "cache_write": t3_cw,
+                "confidence": "measured",
+                "fresh_in": t3_fresh,
+                "output": t3_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Turn 4 (carry #2): 12m idle gap expires 5m TTL -> cold cache_write = 50,120
+    # (carries 40,000 cache_write for Bash tool_result).
+    u4_uuid, u4_text = push_user_text(a3_uuid, "2026-10-31T09:22:25Z", 120)
+    t4_fresh, t4_cw, t4_cr, t4_out = 50, 50120, 0, 20
+    a4_uuid, a4_text = push_assistant_text(
+        u4_uuid, "2026-10-31T09:22:30Z", 80, t4_fresh, t4_cw, t4_cr, t4_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u4_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a4_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t4_fresh + t4_cw + t4_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:22:30Z",
+            "turn": 4,
+            "usage": {
+                "cache_read": t4_cr,
+                "cache_write": t4_cw,
+                "confidence": "measured",
+                "fresh_in": t4_fresh,
+                "output": t4_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    # Turn 5 (carry #3): warm cache_read = 50,170 (carries 40,000 cache_read for Bash tool_result).
+    u5_uuid, u5_text = push_user_text(a4_uuid, "2026-10-31T09:22:36Z", 80)
+    t5_fresh, t5_cw, t5_cr, t5_out = 40, 0, 50170, 25
+    _, a5_text = push_assistant_text(
+        u5_uuid, "2026-10-31T09:22:42Z", 100, t5_fresh, t5_cw, t5_cr, t5_out
+    )
+    turns_gt.append(
+        {
+            "added_blocks": [
+                {"bytes": len(u5_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a5_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t5_fresh + t5_cw + t5_cr,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T09:22:42Z",
+            "turn": 5,
+            "usage": {
+                "cache_read": t5_cr,
+                "cache_write": t5_cw,
+                "confidence": "measured",
+                "fresh_in": t5_fresh,
+                "output": t5_out,
+                "reasoning": None,
+            },
+        }
+    )
+
+    expected = {
+        "agent": "claude-code",
+        "log_files": [log_rel],
+        "scenario": "tool-bloat",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": model,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    return {
+        f"claude-code/tool-bloat/{log_rel}": dumps_jsonl(records),
+        "claude-code/tool-bloat/expected.json": dumps_pretty_json(expected),
+    }
+
+
 def generate_all(seed: int) -> dict[str, bytes]:
     rng = SplitMix64(seed)
     files: dict[str, bytes] = {}
@@ -1486,6 +1832,7 @@ def generate_all(seed: int) -> dict[str, bytes]:
         gen_claude_streaming_dupes,
         gen_codex_basic,
         gen_codex_dual_usage,
+        gen_claude_tool_bloat,
     ):
         # Derive an independent deterministic sub-seed per scenario so adding new
         # scenarios in later tasks never shifts existing scenario bytes!
@@ -1542,6 +1889,8 @@ def main() -> int:
 
     for rel, data in expected_files.items():
         dst = args.out / rel
+        if dst.is_file() and dst.read_bytes() == data:
+            continue
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(data)
 

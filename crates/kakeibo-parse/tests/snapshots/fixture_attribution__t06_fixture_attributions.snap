@@ -1,0 +1,500 @@
+---
+source: crates/kakeibo-parse/tests/fixture_attribution.rs
+expression: snapshots
+---
+[
+  {
+    "agent": "claude-code",
+    "scenario": "basic",
+    "turns": 3,
+    "fixed_overhead_tokens": 9708,
+    "totals": {
+      "fresh_in": 683,
+      "cache_write": 10064,
+      "cache_read": 19868,
+      "output": 282
+    },
+    "categories": {
+      "fixed_overhead": {
+        "fresh_in": 308,
+        "cache_write": 9595,
+        "cache_read": 19221,
+        "output": 0
+      },
+      "resent_history": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 647,
+        "output": 0
+      },
+      "tool_output": {
+        "fresh_in": 290,
+        "cache_write": 347,
+        "cache_read": 0,
+        "output": 0
+      },
+      "retries": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "user_input": {
+        "fresh_in": 24,
+        "cache_write": 1,
+        "cache_read": 0,
+        "output": 0
+      },
+      "assistant_output": {
+        "fresh_in": 38,
+        "cache_write": 76,
+        "cache_read": 0,
+        "output": 282
+      },
+      "subagents": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "compaction": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "unattributed": {
+        "fresh_in": 23,
+        "cache_write": 45,
+        "cache_read": 0,
+        "output": 0
+      }
+    },
+    "top_carried_blocks": [
+      {
+        "source_turn": 2,
+        "born_turn": 2,
+        "kind": "tool_result",
+        "tool": "Read",
+        "bytes": 380,
+        "scaled_prompt_tokens": 380,
+        "carried_turns": 1,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 8,
+          "cache_read": 372,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 760
+      },
+      {
+        "source_turn": 1,
+        "born_turn": 2,
+        "kind": "assistant_text",
+        "tool": null,
+        "bytes": 112,
+        "scaled_prompt_tokens": 112,
+        "carried_turns": 1,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 2,
+          "cache_read": 110,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 224
+      },
+      {
+        "source_turn": 1,
+        "born_turn": 2,
+        "kind": "tool_use",
+        "tool": "Read",
+        "bytes": 53,
+        "scaled_prompt_tokens": 53,
+        "carried_turns": 1,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 1,
+          "cache_read": 52,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 106
+      }
+    ]
+  },
+  {
+    "agent": "claude-code",
+    "scenario": "streaming-dupes",
+    "turns": 2,
+    "fixed_overhead_tokens": 11598,
+    "totals": {
+      "fresh_in": 622,
+      "cache_write": 11510,
+      "cache_read": 11630,
+      "output": 205
+    },
+    "categories": {
+      "fixed_overhead": {
+        "fresh_in": 398,
+        "cache_write": 11200,
+        "cache_read": 11598,
+        "output": 0
+      },
+      "resent_history": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 32,
+        "output": 0
+      },
+      "tool_output": {
+        "fresh_in": 109,
+        "cache_write": 177,
+        "cache_read": 0,
+        "output": 0
+      },
+      "retries": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "user_input": {
+        "fresh_in": 32,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "assistant_output": {
+        "fresh_in": 83,
+        "cache_write": 133,
+        "cache_read": 0,
+        "output": 205
+      },
+      "subagents": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "compaction": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "unattributed": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      }
+    },
+    "top_carried_blocks": [
+      {
+        "source_turn": 1,
+        "born_turn": 1,
+        "kind": "user_prompt",
+        "tool": null,
+        "bytes": 128,
+        "scaled_prompt_tokens": 32,
+        "carried_turns": 1,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 0,
+          "cache_read": 32,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 64
+      }
+    ]
+  },
+  {
+    "agent": "claude-code",
+    "scenario": "tool-bloat",
+    "turns": 5,
+    "fixed_overhead_tokens": 10000,
+    "totals": {
+      "fresh_in": 130,
+      "cache_write": 100200,
+      "cache_read": 110260,
+      "output": 135
+    },
+    "categories": {
+      "fixed_overhead": {
+        "fresh_in": 0,
+        "cache_write": 20000,
+        "cache_read": 30000,
+        "output": 0
+      },
+      "resent_history": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 80260,
+        "output": 0
+      },
+      "tool_output": {
+        "fresh_in": 0,
+        "cache_write": 80040,
+        "cache_read": 0,
+        "output": 0
+      },
+      "retries": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "user_input": {
+        "fresh_in": 82,
+        "cache_write": 68,
+        "cache_read": 0,
+        "output": 0
+      },
+      "assistant_output": {
+        "fresh_in": 48,
+        "cache_write": 92,
+        "cache_read": 0,
+        "output": 135
+      },
+      "subagents": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "compaction": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "unattributed": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      }
+    },
+    "top_carried_blocks": [
+      {
+        "source_turn": 2,
+        "born_turn": 2,
+        "kind": "tool_result",
+        "tool": "Bash",
+        "bytes": 160000,
+        "scaled_prompt_tokens": 40000,
+        "carried_turns": 3,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 40000,
+          "cache_read": 80000,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 160000
+      },
+      {
+        "source_turn": 1,
+        "born_turn": 2,
+        "kind": "assistant_text",
+        "tool": null,
+        "bytes": 120,
+        "scaled_prompt_tokens": 30,
+        "carried_turns": 3,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 30,
+          "cache_read": 60,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 120
+      },
+      {
+        "source_turn": 1,
+        "born_turn": 1,
+        "kind": "user_prompt",
+        "tool": null,
+        "bytes": 80,
+        "scaled_prompt_tokens": 20,
+        "carried_turns": 4,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 20,
+          "cache_read": 60,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 100
+      }
+    ]
+  },
+  {
+    "agent": "codex",
+    "scenario": "basic",
+    "turns": 2,
+    "fixed_overhead_tokens": 8980,
+    "totals": {
+      "fresh_in": 3112,
+      "cache_write": 0,
+      "cache_read": 15406,
+      "output": 315
+    },
+    "categories": {
+      "fixed_overhead": {
+        "fresh_in": 2580,
+        "cache_write": 0,
+        "cache_read": 15380,
+        "output": 0
+      },
+      "resent_history": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 26,
+        "output": 0
+      },
+      "tool_output": {
+        "fresh_in": 349,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "retries": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "user_input": {
+        "fresh_in": 26,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "assistant_output": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 315
+      },
+      "subagents": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "compaction": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "unattributed": {
+        "fresh_in": 157,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      }
+    },
+    "top_carried_blocks": [
+      {
+        "source_turn": 1,
+        "born_turn": 1,
+        "kind": "user_prompt",
+        "tool": null,
+        "bytes": 104,
+        "scaled_prompt_tokens": 26,
+        "carried_turns": 1,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 0,
+          "cache_read": 26,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 52
+      }
+    ]
+  },
+  {
+    "agent": "codex",
+    "scenario": "codex-dual-usage",
+    "turns": 2,
+    "fixed_overhead_tokens": 12026,
+    "totals": {
+      "fresh_in": 3643,
+      "cache_write": 0,
+      "cache_read": 21020,
+      "output": 400
+    },
+    "categories": {
+      "fixed_overhead": {
+        "fresh_in": 3066,
+        "cache_write": 0,
+        "cache_read": 20986,
+        "output": 0
+      },
+      "resent_history": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 34,
+        "output": 0
+      },
+      "tool_output": {
+        "fresh_in": 358,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "retries": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "user_input": {
+        "fresh_in": 34,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "assistant_output": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 400
+      },
+      "subagents": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "compaction": {
+        "fresh_in": 0,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      },
+      "unattributed": {
+        "fresh_in": 185,
+        "cache_write": 0,
+        "cache_read": 0,
+        "output": 0
+      }
+    },
+    "top_carried_blocks": [
+      {
+        "source_turn": 1,
+        "born_turn": 1,
+        "kind": "user_prompt",
+        "tool": null,
+        "bytes": 136,
+        "scaled_prompt_tokens": 34,
+        "carried_turns": 1,
+        "carried_split": {
+          "fresh_in": 0,
+          "cache_write": 0,
+          "cache_read": 34,
+          "output": 0
+        },
+        "lifetime_prompt_tokens": 68
+      }
+    ]
+  }
+]
