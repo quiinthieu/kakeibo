@@ -203,7 +203,7 @@ Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claud
   *AC:* `basic`/`streaming-dupes` match `expected.json` exactly; `hostile` → diagnostics, no panic; privacy grep clean.
 - [x] **T05 Codex parser.** Rollouts (+ archived, `CODEX_HOME`), `session_meta`/`turn_context`, usage precedence, fork history, `rate_limits`.
   *AC:* `codex-dual-usage` not double counted; cumulative-only fixture gives correct deltas; cached never added to input.
-- [ ] **T06 Attribution engine.** Estimator ADR, scaling, carry, categories, `Unattributed`.
+- [x] **T06 Attribution engine.** Estimator ADR, scaling, carry, categories, `Unattributed`.
   *AC:* reconciliation property on all fixtures; `tool-bloat` carried cost equals a hand-computed value.
 - [ ] **T07 Flags v1.** `cold-resume`, `near-full-context`, `tool-output-bloat`, `cache-miss-storm`, `heavy-overhead`.
   *AC:* each fires on its scenario with the right turn range, silent on `basic`; text golden.
