@@ -191,7 +191,7 @@ Bounded-memory streaming (lines > 16 MB skipped with a diagnostic), rayon across
 Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claude Code + Codex in the terminal.
 
 ### M0 Skeleton
-- [ ] **T01 Workspace & tooling.** §3.1 crates as stubs, `product.rs`, `rust-toolchain.toml`, `deny.toml`, `ci.yml`, both lints, `DependencyGraphTests`.
+- [x] **T01 Workspace & tooling.** §3.1 crates as stubs, `product.rs`, `rust-toolchain.toml`, `deny.toml`, `ci.yml`, both lints, `DependencyGraphTests`.
   *AC:* CI green on macOS + Linux; `--version` from `product.rs`; lints catch a planted `std::net` and a planted `/Users/alice`.
 - [ ] **T02 Fixture generator & harness.** `gen-fixtures` with ground truth for Claude/Codex `basic`, `streaming-dupes`, `codex-dual-usage`; `TestEnv`; insta; `docs/formats/{claude-code,codex}.md` from a real install (field names only).
   *AC:* byte-stable fixtures for a fixed seed; every used field cites a source.
