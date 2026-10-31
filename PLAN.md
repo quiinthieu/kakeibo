@@ -215,7 +215,7 @@ Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claud
   *AC:* no price literals in code (lint); unpriced never shows $0; import tested on a tiny synthetic LiteLLM-shaped file.
 - [x] **T10 Gemini CLI + opencode.** JSONL/JSON with rewind/patch and slug registry; read-only SQLite + legacy tree.
   *AC:* scenarios match ground truth; DB unchanged (hash + mtime) while another connection holds a write lock.
-- [ ] **T11 Aider + Cursor (best effort).** History/analytics parsing; `state.vscdb` reader.
+- [x] **T11 Aider + Cursor (best effort).** History/analytics parsing; `state.vscdb` reader.
   *AC:* fixtures parse; zero Cursor counts render as "not recorded"; all labelled `estimated`.
 - [ ] **T12 Incremental index & perf.** Index (ADR: SQLite vs files), offset resume, truncation detection, rayon, pre-filter.
   *AC:* cached == uncached (property); append re-reads only new bytes (counter); 1 GB bench in `docs/perf.md`.
