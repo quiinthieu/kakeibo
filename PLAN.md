@@ -205,7 +205,7 @@ Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claud
   *AC:* `codex-dual-usage` not double counted; cumulative-only fixture gives correct deltas; cached never added to input.
 - [x] **T06 Attribution engine.** Estimator ADR, scaling, carry, categories, `Unattributed`.
   *AC:* reconciliation property on all fixtures; `tool-bloat` carried cost equals a hand-computed value.
-- [ ] **T07 Flags v1.** `cold-resume`, `near-full-context`, `tool-output-bloat`, `cache-miss-storm`, `heavy-overhead`.
+- [x] **T07 Flags v1.** `cold-resume`, `near-full-context`, `tool-output-bloat`, `cache-miss-storm`, `heavy-overhead`.
   *AC:* each fires on its scenario with the right turn range, silent on `basic`; text golden.
 - [ ] **T08 CLI & export (MVP release).** default view, `sessions`, `autopsy`, `flags`, `top`, `export`, `doctor`.
   *AC:* `assert_cmd` per subcommand; JSON matches `cli-schema.md`; Markdown pathless by default; `v0.1.0`.
