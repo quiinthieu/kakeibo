@@ -1,0 +1,93 @@
+{
+  "agent": "cursor",
+  "log_files": [
+    "cursor_kv.json"
+  ],
+  "scenario": "zero-tokens",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "claude-sonnet-4-5",
+      "session_id": "28d2a8f1-6c1e-4662-9676-d59a9844e5d5",
+      "totals": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "fresh_in": 0,
+        "output": 0,
+        "prompt_tokens": 0,
+        "reasoning": 0,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 92,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 128,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 0,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T13:00:10Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 0,
+            "confidence": "not_recorded",
+            "fresh_in": 0,
+            "output": 0,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 76,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 110,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 0,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T13:00:35Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 0,
+            "confidence": "not_recorded",
+            "fresh_in": 0,
+            "output": 0,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

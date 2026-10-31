@@ -1,0 +1,71 @@
+{
+  "agent": "aider",
+  "log_files": [
+    "analytics.jsonl"
+  ],
+  "scenario": "analytics-log",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 2,
+      "model": "claude-sonnet-4-5",
+      "session_id": "aider_ana_164abf5c46d52f98",
+      "totals": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "fresh_in": 24256,
+        "output": 855,
+        "prompt_tokens": 24256,
+        "reasoning": 0,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 10813,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T12:00:10Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 0,
+            "confidence": "estimated",
+            "fresh_in": 10813,
+            "output": 340,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 13443,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T12:00:45Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 0,
+            "confidence": "estimated",
+            "fresh_in": 13443,
+            "output": 515,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

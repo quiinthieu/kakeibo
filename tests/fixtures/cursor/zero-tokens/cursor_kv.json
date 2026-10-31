@@ -1,0 +1,90 @@
+{
+  "cursorDiskKV": [
+    {
+      "key": "composerData:28d2a8f1-6c1e-4662-9676-d59a9844e5d5",
+      "value": {
+        "_v": 3,
+        "composerId": "28d2a8f1-6c1e-4662-9676-d59a9844e5d5",
+        "createdAt": 1793451600000,
+        "fullConversationHeadersOnly": [
+          {
+            "bubbleId": "3229ee6a-028c-4f2c-8437-26f46040819e",
+            "type": 1
+          },
+          {
+            "bubbleId": "a9d8946f-0b7c-4513-ae78-4ae308a9e55b",
+            "type": 2
+          },
+          {
+            "bubbleId": "40382074-d058-41f3-96e7-bfa180b2e947",
+            "type": 1
+          },
+          {
+            "bubbleId": "04b02f35-6468-4168-9e1d-fc6537cdf22c",
+            "type": 2
+          }
+        ],
+        "lastUpdatedAt": 1793451640000,
+        "modelConfig": {
+          "modelName": "claude-sonnet-4-5"
+        },
+        "name": "Synthetic zero-token composer",
+        "workspaceUri": "file:///synthetic/workspace/cursor-zero"
+      }
+    },
+    {
+      "key": "bubbleId:28d2a8f1-6c1e-4662-9676-d59a9844e5d5:3229ee6a-028c-4f2c-8437-26f46040819e",
+      "value": {
+        "_v": 3,
+        "bubbleId": "3229ee6a-028c-4f2c-8437-26f46040819e",
+        "createdAt": 1793451601000,
+        "text": "parser offset target counter router prism vessel engine tablet module diary prism target re.",
+        "tokenCount": {
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "type": 1
+      }
+    },
+    {
+      "key": "bubbleId:28d2a8f1-6c1e-4662-9676-d59a9844e5d5:a9d8946f-0b7c-4513-ae78-4ae308a9e55b",
+      "value": {
+        "_v": 3,
+        "bubbleId": "a9d8946f-0b7c-4513-ae78-4ae308a9e55b",
+        "createdAt": 1793451610000,
+        "modelInfo": {
+          "modelName": "claude-sonnet-4-5"
+        },
+        "text": "tablet quartz alpha manifest entry beacon symbol schema symbol packet stream beacon pebble archive circuit lantern archive beac.",
+        "tokenCount": {
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "type": 2
+      }
+    },
+    {
+      "key": "bubbleId:28d2a8f1-6c1e-4662-9676-d59a9844e5d5:40382074-d058-41f3-96e7-bfa180b2e947",
+      "value": {
+        "_v": 3,
+        "bubbleId": "40382074-d058-41f3-96e7-bfa180b2e947",
+        "createdAt": 1793451620000,
+        "text": "window circuit sample pocket token tracer circuit lantern anchor canvas tok.",
+        "type": 1
+      }
+    },
+    {
+      "key": "bubbleId:28d2a8f1-6c1e-4662-9676-d59a9844e5d5:04b02f35-6468-4168-9e1d-fc6537cdf22c",
+      "value": {
+        "_v": 3,
+        "bubbleId": "04b02f35-6468-4168-9e1d-fc6537cdf22c",
+        "createdAt": 1793451635000,
+        "modelInfo": {
+          "modelName": "claude-sonnet-4-5"
+        },
+        "text": "cipher prompt socket window worker catalog pattern marker window cursor sample parser target context locale e.",
+        "type": 2
+      }
+    }
+  ]
+}

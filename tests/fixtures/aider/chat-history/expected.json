@@ -1,0 +1,175 @@
+{
+  "agent": "aider",
+  "log_files": [
+    ".aider.chat.history.md"
+  ],
+  "scenario": "chat-history",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "claude-sonnet-4-5",
+      "session_id": "aider_hist_c8fbf9a2b73e815b",
+      "totals": {
+        "cache_read": 9500,
+        "cache_write": 11000,
+        "fresh_in": 6356,
+        "output": 2140,
+        "prompt_tokens": 26856,
+        "reasoning": 0,
+        "turns": 3
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 88,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 120,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 12000,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:00Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 9500,
+            "confidence": "estimated",
+            "fresh_in": 2500,
+            "output": 1400,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 72,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 104,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 14000,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:00Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 9500,
+            "cache_write": 1500,
+            "confidence": "estimated",
+            "fresh_in": 3000,
+            "output": 620,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 64,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 96,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": true,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 856,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:00:00Z",
+          "turn": 3,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 0,
+            "confidence": "estimated",
+            "fresh_in": 856,
+            "output": 120,
+            "reasoning": null
+          }
+        }
+      ]
+    },
+    {
+      "ignored_records": 0,
+      "model": "gpt-4o",
+      "session_id": "aider_hist_1fefd50d722c8a00",
+      "totals": {
+        "cache_read": 0,
+        "cache_write": 0,
+        "fresh_in": 4200,
+        "output": 310,
+        "prompt_tokens": 4200,
+        "reasoning": 0,
+        "turns": 1
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 80,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 112,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "gpt-4o",
+          "prompt_tokens": 4200,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T11:30:00Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 0,
+            "confidence": "estimated",
+            "fresh_in": 4200,
+            "output": 310,
+            "reasoning": null
+          }
+        }
+      ]
+    }
+  ]
+}

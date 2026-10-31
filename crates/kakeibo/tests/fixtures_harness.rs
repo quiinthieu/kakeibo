@@ -24,6 +24,13 @@ const T10_SCENARIOS: &[(&str, &str)] = &[
     ("opencode", "subagent-cost"),
 ];
 
+const T11_SCENARIOS: &[(&str, &str)] = &[
+    ("aider", "chat-history"),
+    ("aider", "analytics-log"),
+    ("cursor", "zero-tokens"),
+    ("cursor", "estimated-tokens"),
+];
+
 const OPAQUE_MAP_PREFIXES: &[&str] = &[
     "message.content[].input.",
     "snapshot.trackedFileBackups.",
@@ -34,6 +41,7 @@ const OPAQUE_MAP_PREFIXES: &[&str] = &[
     "messages[].toolCalls[].args.",
     "state.input.",
     "state.metadata.",
+    "toolFormerData.params.",
 ];
 
 fn collect_relative_files(base: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
@@ -223,6 +231,8 @@ fn every_used_fixture_field_cites_a_source_in_format_docs() {
         ("codex", root.join("docs/formats/codex.md")),
         ("gemini-cli", root.join("docs/formats/gemini-cli.md")),
         ("opencode", root.join("docs/formats/opencode.md")),
+        ("aider", root.join("docs/formats/aider.md")),
+        ("cursor", root.join("docs/formats/cursor.md")),
     ];
 
     for (agent, doc_path) in agent_docs {
@@ -263,16 +273,51 @@ fn every_used_fixture_field_cites_a_source_in_format_docs() {
                         serde_json::from_slice(bytes).unwrap_or_else(|e| {
                             panic!("invalid JSON in {}/{} -> {e}", agent, rel.display())
                         });
-                    collect_json_field_paths(&val, "", &mut used_fields);
+                    if rel.file_name().and_then(|s| s.to_str()) == Some("cursor_kv.json") {
+                        let entries = val
+                            .get("cursorDiskKV")
+                            .and_then(serde_json::Value::as_array)
+                            .expect("cursor_kv.json must wrap cursorDiskKV array");
+                        for entry in entries {
+                            assert!(
+                                entry
+                                    .get("key")
+                                    .and_then(serde_json::Value::as_str)
+                                    .is_some(),
+                                "cursor_kv.json entry must have string key"
+                            );
+                            let entry_val = entry
+                                .get("value")
+                                .expect("cursor_kv.json entry must have value");
+                            collect_json_field_paths(entry_val, "", &mut used_fields);
+                        }
+                    } else {
+                        collect_json_field_paths(&val, "", &mut used_fields);
+                    }
+                }
+                Some("md") => {
+                    fixture_count += 1;
+                    let text = std::str::from_utf8(bytes).expect("UTF-8 synthetic markdown");
+                    for line in text.lines() {
+                        for marker in [
+                            "# aider chat started at",
+                            "> Aider v",
+                            "> Main model:",
+                            "> Models:",
+                            "> Tokens:",
+                            "####",
+                        ] {
+                            if line.starts_with(marker) {
+                                used_fields.insert(marker.to_string());
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
         }
 
-        assert!(
-            fixture_count >= 2,
-            "expected >= 2 JSON/JSONL fixtures for {agent}"
-        );
+        assert!(fixture_count >= 2, "expected >= 2 fixture logs for {agent}");
         let uncited: Vec<&String> = used_fields
             .iter()
             .filter(|f| !cited_fields.contains(*f))
@@ -299,7 +344,11 @@ fn ground_truth_normalisation_invariants_and_fixture_lint_hold() {
         String::from_utf8_lossy(&lint_out.stderr)
     );
 
-    for (agent, scenario) in REQUIRED_SCENARIOS.iter().chain(T10_SCENARIOS.iter()) {
+    for (agent, scenario) in REQUIRED_SCENARIOS
+        .iter()
+        .chain(T10_SCENARIOS.iter())
+        .chain(T11_SCENARIOS.iter())
+    {
         let scenario_dir = root.join("tests/fixtures").join(agent).join(scenario);
         let raw = fs::read_to_string(scenario_dir.join("expected.json"))
             .unwrap_or_else(|e| panic!("missing expected.json for {agent}/{scenario}: {e}"));
@@ -380,15 +429,21 @@ fn test_env_isolates_home_and_enforces_readonly_guard() {
     let (staged_codex, codex_gt) = env.stage_fixture("codex", "codex-dual-usage");
     let (staged_gemini, gemini_gt) = env.stage_fixture("gemini-cli", "rewind-patch");
     let (staged_opencode, opencode_gt) = env.stage_fixture("opencode", "legacy-tree");
+    let (staged_aider, aider_gt) = env.stage_fixture("aider", "chat-history");
+    let (staged_cursor, cursor_gt) = env.stage_fixture("cursor", "zero-tokens");
     assert_eq!(claude_gt.agent, "claude-code");
     assert_eq!(codex_gt.agent, "codex");
     assert_eq!(gemini_gt.agent, "gemini-cli");
     assert_eq!(opencode_gt.agent, "opencode");
+    assert_eq!(aider_gt.agent, "aider");
+    assert_eq!(cursor_gt.agent, "cursor");
 
     for path in staged_claude
         .iter()
         .chain(staged_codex.iter())
         .chain(staged_gemini.iter())
+        .chain(staged_aider.iter())
+        .chain(staged_cursor.iter())
     {
         assert!(path.starts_with(env.home_dir()));
         assert!(path.is_file());
