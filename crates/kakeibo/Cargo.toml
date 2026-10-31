@@ -1,0 +1,24 @@
+[package]
+name = "kakeibo"
+description = "Token budget diary for your coding agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+kakeibo-core.workspace = true
+kakeibo-index.workspace = true
+kakeibo-parse.workspace = true
+kakeibo-report.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+tempfile.workspace = true
+toml.workspace = true
