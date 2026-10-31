@@ -54,6 +54,8 @@ pub struct SessionExportV1 {
 #[derive(Debug, Clone, Serialize)]
 pub struct CostExportV1 {
     pub status: CostStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
     pub usd: Option<f64>,
 }
 
@@ -85,7 +87,7 @@ pub struct CategoriesExportV1 {
     pub breakdown: BTreeMap<Category, CategoryBucketExportV1>,
 }
 
-/// Per-category token split and share basis points (`docs/cli-schema.md` §6).
+/// Per-category token split, share basis points, and optional API-equivalent USD cost (`docs/cli-schema.md` §6).
 #[derive(Debug, Clone, Serialize)]
 pub struct CategoryBucketExportV1 {
     pub prompt_tokens: u64,
@@ -95,6 +97,8 @@ pub struct CategoryBucketExportV1 {
     pub cache_read: u64,
     pub output: u64,
     pub share_bps: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
 }
 
 /// Ranked root-cause flag finding with plain-words sentence, evidence text, and structured payload (`docs/cli-schema.md` §7).
@@ -135,6 +139,12 @@ pub struct TurnExportV1 {
     pub prompt_tokens: u64,
     pub measured: TokenSplit,
     pub measured_confidence: Confidence,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_5m_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_1h_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
     pub categories: CategoryBreakdown,
     pub category_confidence: Confidence,
     pub estimation_method: &'static str,
@@ -150,11 +160,22 @@ pub fn build_json_export_v1(sessions: &[SessionReport], show_paths: bool) -> Cli
     for report in sessions {
         let tot = report.totals();
         let total_tokens = tot.total_tokens();
+        let session_is_usd = report
+            .cost_attribution
+            .currency
+            .as_deref()
+            .is_some_and(|c| c.eq_ignore_ascii_case("USD"));
 
         let mut breakdown = BTreeMap::new();
         for cat in Category::ALL {
             let split = report.attribution.categories.get(cat);
             let cat_total = split.total_tokens();
+            let cost_usd = report
+                .cost_attribution
+                .category_costs
+                .as_ref()
+                .filter(|_| session_is_usd)
+                .and_then(|m| m.get(&cat).copied());
             breakdown.insert(
                 cat,
                 CategoryBucketExportV1 {
@@ -165,6 +186,7 @@ pub fn build_json_export_v1(sessions: &[SessionReport], show_paths: bool) -> Cli
                     cache_read: split.cache_read,
                     output: split.output,
                     share_bps: share_basis_points(cat_total, total_tokens),
+                    cost_usd,
                 },
             );
         }
@@ -205,20 +227,44 @@ pub fn build_json_export_v1(sessions: &[SessionReport], show_paths: bool) -> Cli
             .turns
             .iter()
             .zip(&report.attribution.turns)
-            .map(|(tr, ta)| TurnExportV1 {
-                turn: tr.turn,
-                ts: tr.ts,
-                model: tr.model.clone(),
-                prompt_tokens: ta.measured.prompt_tokens(),
-                measured: ta.measured,
-                measured_confidence: ta.measured_confidence,
-                categories: ta.categories,
-                category_confidence: ta.category_confidence,
-                estimation_method: ta.estimation_method,
-                new_unattributed_prompt_tokens: ta.new_unattributed_prompt_tokens,
-                hints: tr.hints.clone(),
+            .enumerate()
+            .map(|(idx, (tr, ta))| {
+                let tc = report
+                    .cost_attribution
+                    .turn_costs
+                    .get(idx)
+                    .and_then(Option::as_ref);
+                let turn_cost_usd = tc
+                    .filter(|c| c.currency.eq_ignore_ascii_case("USD"))
+                    .map(|c| c.total_cost);
+                let (w5m, w1h) = match tc {
+                    Some(c) => (Some(c.write_tiers.tokens_5m), Some(c.write_tiers.tokens_1h)),
+                    None => (None, None),
+                };
+
+                TurnExportV1 {
+                    turn: tr.turn,
+                    ts: tr.ts,
+                    model: tr.model.clone(),
+                    prompt_tokens: ta.measured.prompt_tokens(),
+                    measured: ta.measured,
+                    measured_confidence: ta.measured_confidence,
+                    cache_write_5m_tokens: w5m,
+                    cache_write_1h_tokens: w1h,
+                    cost_usd: turn_cost_usd,
+                    categories: ta.categories,
+                    category_confidence: ta.category_confidence,
+                    estimation_method: ta.estimation_method,
+                    new_unattributed_prompt_tokens: ta.new_unattributed_prompt_tokens,
+                    hints: tr.hints.clone(),
+                }
             })
             .collect();
+
+        let export_currency = match report.cost.status {
+            CostStatus::Configured | CostStatus::PartialConfigured => report.cost.currency.clone(),
+            CostStatus::Unpriced | CostStatus::AgentReported => None,
+        };
 
         exported_sessions.push(SessionExportV1 {
             agent: report.agent,
@@ -235,6 +281,7 @@ pub fn build_json_export_v1(sessions: &[SessionReport], show_paths: bool) -> Cli
             },
             cost: CostExportV1 {
                 status: report.cost.status,
+                currency: export_currency,
                 usd: report.cost.usd,
             },
             totals: TotalsExportV1 {

@@ -52,5 +52,8 @@ jobs:
       - name: Fixtures lint
         run: ./scripts/lint-fixtures.sh
 
+      - name: Pricing lint
+        run: ./scripts/lint-pricing.sh
+
       - name: Verify synthetic fixtures byte-stability
         run: python3 scripts/gen-fixtures/generate.py --seed 42 --check

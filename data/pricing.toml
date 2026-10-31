@@ -1,0 +1,42 @@
+# Bundled API-equivalent pricing catalog (`PLAN.md` §0 #7, §6.2, §10 T09).
+#
+# Shipped intentionally with EMPTY rate placeholders and official vendor pricing
+# page `source` URLs + `checked` dates so Kakeibo never invents or ships stale
+# hardcoded prices. Unpriced models always display "unpriced" (never $0).
+#
+# To configure rates locally without network access:
+#   1. Edit `<config_dir>/kakeibo/pricing.toml`, or
+#   2. Download LiteLLM's `model_prices_and_context_window.json` and run:
+#        kakeibo pricing import <path/to/model_prices_and_context_window.json>
+#
+# Supported optional numeric rate keys per `[models."<id>"]` entry (expressed in
+# `currency` per 1,000,000 tokens when `rate_unit = "per_1m_tokens"`):
+#   input, cache_write_5m, cache_write_1h, cache_read, output, reasoning
+
+schema_version = 1
+rate_unit = "per_1m_tokens"
+
+[models."claude-sonnet-4-5"]
+currency = "USD"
+source = "https://www.anthropic.com/pricing"
+checked = "2026-10-31"
+
+[models."claude-opus-4-5"]
+currency = "USD"
+source = "https://www.anthropic.com/pricing"
+checked = "2026-10-31"
+
+[models."claude-haiku-4-5"]
+currency = "USD"
+source = "https://www.anthropic.com/pricing"
+checked = "2026-10-31"
+
+[models."gpt-5-codex"]
+currency = "USD"
+source = "https://openai.com/api/pricing/"
+checked = "2026-10-31"
+
+[models."gemini-2.5-pro"]
+currency = "USD"
+source = "https://ai.google.dev/gemini-api/docs/pricing"
+checked = "2026-10-31"

@@ -1,7 +1,9 @@
-//! Verification tests for `scripts/lint-privacy.sh` and `scripts/lint-fixtures.sh`.
+//! Verification tests for `scripts/lint-privacy.sh`, `scripts/lint-fixtures.sh`,
+//! and `scripts/lint-pricing.sh`.
 //!
-//! Ensures both lints pass on the clean workspace and reliably fail when
-//! forbidden networking tokens or personal fixture paths/emails/keys are planted.
+//! Ensures all three lints pass on the clean workspace and reliably fail when
+//! forbidden networking tokens, personal fixture paths/emails/keys, or hardcoded
+//! price literals are planted.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -149,4 +151,74 @@ fn fixtures_lint_catches_linux_home_real_email_and_api_key() {
             "lint-fixtures.sh must fail on {filename}"
         );
     }
+}
+
+#[test]
+fn pricing_lint_passes_on_clean_workspace() {
+    let output = run_script("scripts/lint-pricing.sh", None);
+    assert!(
+        output.status.success(),
+        "lint-pricing.sh failed on clean workspace:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn pricing_lint_catches_planted_price_literals_in_rust_source() {
+    let cases = [
+        (
+            "per_token_decimal.rs",
+            concat!("pub const SONNET_IN: f64 = 0.000", "003;\n"),
+        ),
+        (
+            "per_token_sci.rs",
+            concat!("pub const OPUS_OUT: f64 = 7.5", "e-5;\n"),
+        ),
+        (
+            "rate_assignment.rs",
+            concat!("fn bad() { let input_rate = ", "3.00; }\n"),
+        ),
+        (
+            "model_arm.rs",
+            concat!(
+                "fn price(m: &str) -> f64 { match m { \"claude-sonnet-4-5\" => ",
+                "3.00, _ => 0.0 } }\n"
+            ),
+        ),
+    ];
+
+    for (filename, content) in cases {
+        let tmp = tempdir().expect("create temp dir");
+        let src_dir = tmp.path().join("crates/rogue/src");
+        fs::create_dir_all(&src_dir).expect("create rogue crate dir");
+        fs::write(src_dir.join(filename), content).expect("write planted source");
+
+        let output = run_script("scripts/lint-pricing.sh", Some(tmp.path()));
+        assert!(
+            !output.status.success(),
+            "lint-pricing.sh must fail when hardcoded price literal is planted in {filename}"
+        );
+    }
+}
+
+#[test]
+fn pricing_lint_catches_non_empty_rates_in_bundled_pricing_toml() {
+    let tmp = tempdir().expect("create temp dir");
+    let data_dir = tmp.path().join("data");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    fs::write(
+        data_dir.join("pricing.toml"),
+        concat!(
+            "schema_version = 1\n[models.\"claude-sonnet-4-5\"]\ncurrency = \"USD\"\ninput = ",
+            "3.0\nsource = \"https://www.anthropic.com/pricing\"\nchecked = \"2026-10-31\"\n"
+        ),
+    )
+    .expect("write planted pricing.toml");
+
+    let output = run_script("scripts/lint-pricing.sh", Some(tmp.path()));
+    assert!(
+        !output.status.success(),
+        "lint-pricing.sh must fail when bundled data/pricing.toml ships non-empty numeric rates"
+    );
 }

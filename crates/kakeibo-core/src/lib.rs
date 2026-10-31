@@ -8,6 +8,7 @@ pub mod attrib;
 pub mod flags;
 pub mod ledger;
 pub mod model;
+pub mod pricing;
 pub mod product;
 pub mod usage;
 
@@ -26,5 +27,10 @@ pub use flags::{
 pub use model::{
     AgentId, BlockKind, Category, Confidence, ContentBlock, Timestamp, TimestampError, TurnHints,
     TurnRecord, UnknownAgentError, UnknownCategoryError,
+};
+pub use pricing::{
+    import_litellm_json_str, price_session, CacheWriteTierTokens, CostStatus, LiteLlmImportResult,
+    ModelPriceEntry, PricingCatalog, PricingError, RateUnit, SessionCostAttribution,
+    TurnCostBreakdown, LITELLM_IMPORT_SOURCE, PRICING_SCHEMA_VERSION,
 };
 pub use usage::{CacheWriteSplit, DisjointUsageInput, InclusiveUsageInput, Usage, UsageError};

@@ -1,4 +1,4 @@
-//! GitHub-Flavored Markdown session autopsy exporter (`PLAN.md` §6.4, §10 T08).
+//! GitHub-Flavored Markdown session autopsy exporter (`PLAN.md` §6.2, §6.4, §10 T08–T09).
 //!
 //! Pathless by default: projects render as `proj:<cwd_hash>` unless `show_paths` is `true`.
 
@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use kakeibo_core::{product, Category, Confidence};
 
 use crate::flags::{format_tokens, render_flag_evidence, render_flag_sentence};
-use crate::model::{format_share_pct, share_basis_points, SessionReport};
+use crate::model::{format_currency_amount, format_share_pct, share_basis_points, SessionReport};
 
 fn provenance_label(confidence: Confidence, method: Option<&str>) -> String {
     match (confidence, method) {
@@ -79,30 +79,57 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
         let _ = writeln!(out, "- **Cost:** {}\n", report.cost.display_label());
 
         out.push_str("### Category Breakdown\n\n");
-        out.push_str(
-            "| Category | Total | Share | Fresh In | Cache Write | Cache Read | Output | Provenance |\n",
-        );
-        out.push_str("|---|---:|---:|---:|---:|---:|---:|---|\n");
         let cat_prov = provenance_label(
             report.attribution.category_confidence,
             Some(report.attribution.estimation_method),
         );
-        for cat in Category::ALL {
-            let split = report.attribution.categories.get(cat);
-            let cat_total = split.total_tokens();
-            let bps = share_basis_points(cat_total, total_tokens);
-            let _ = writeln!(
-                out,
-                "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
-                cat,
-                format_tokens(cat_total),
-                format_share_pct(bps),
-                format_tokens(split.fresh_in),
-                format_tokens(split.cache_write),
-                format_tokens(split.cache_read),
-                format_tokens(split.output),
-                cat_prov,
+        if let Some(ref cat_costs) = report.cost_attribution.category_costs {
+            let curr = report.cost_attribution.currency.as_deref().unwrap_or("USD");
+            out.push_str(
+                "| Category | Total | Share | Fresh In | Cache Write | Cache Read | Output | Cost | Provenance |\n",
             );
+            out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---|\n");
+            for cat in Category::ALL {
+                let split = report.attribution.categories.get(cat);
+                let cat_total = split.total_tokens();
+                let bps = share_basis_points(cat_total, total_tokens);
+                let c_val = cat_costs.get(&cat).copied().unwrap_or(0.0);
+                let _ = writeln!(
+                    out,
+                    "| `{}` | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    cat,
+                    format_tokens(cat_total),
+                    format_share_pct(bps),
+                    format_tokens(split.fresh_in),
+                    format_tokens(split.cache_write),
+                    format_tokens(split.cache_read),
+                    format_tokens(split.output),
+                    format_currency_amount(curr, c_val),
+                    cat_prov,
+                );
+            }
+        } else {
+            out.push_str(
+                "| Category | Total | Share | Fresh In | Cache Write | Cache Read | Output | Provenance |\n",
+            );
+            out.push_str("|---|---:|---:|---:|---:|---:|---:|---|\n");
+            for cat in Category::ALL {
+                let split = report.attribution.categories.get(cat);
+                let cat_total = split.total_tokens();
+                let bps = share_basis_points(cat_total, total_tokens);
+                let _ = writeln!(
+                    out,
+                    "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
+                    cat,
+                    format_tokens(cat_total),
+                    format_share_pct(bps),
+                    format_tokens(split.fresh_in),
+                    format_tokens(split.cache_write),
+                    format_tokens(split.cache_read),
+                    format_tokens(split.output),
+                    cat_prov,
+                );
+            }
         }
 
         out.push_str("\n### Root-Cause Flags\n\n");
@@ -166,25 +193,63 @@ pub fn render_markdown_export(sessions: &[SessionReport], show_paths: bool) -> S
         }
 
         out.push_str("\n### Per-Turn Breakdown\n\n");
-        out.push_str(
-            "| Turn | Timestamp | Model | Prompt (P) | Fresh In | Cache Write | Cache Read | Output | Unattributed Delta |\n",
-        );
-        out.push_str("|---:|---|---|---:|---:|---:|---:|---:|---:|\n");
-        for (tr, ta) in report.turns.iter().zip(&report.attribution.turns) {
-            let model_str = tr.model.as_deref().unwrap_or("unknown");
-            let _ = writeln!(
-                out,
-                "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} |",
-                tr.turn,
-                tr.ts,
-                model_str,
-                format_tokens(ta.measured.prompt_tokens()),
-                format_tokens(ta.measured.fresh_in),
-                format_tokens(ta.measured.cache_write),
-                format_tokens(ta.measured.cache_read),
-                format_tokens(ta.measured.output),
-                format_tokens(ta.new_unattributed_prompt_tokens),
+        if report.has_any_priced_turn() {
+            out.push_str(
+                "| Turn | Timestamp | Model | Prompt (P) | Fresh In | Cache Write | Cache Read | Output | Cost | Unattributed Delta |\n",
             );
+            out.push_str("|---:|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
+            for (t_idx, (tr, ta)) in report
+                .turns
+                .iter()
+                .zip(&report.attribution.turns)
+                .enumerate()
+            {
+                let model_str = tr.model.as_deref().unwrap_or("unknown");
+                let turn_cost_cell = report
+                    .cost_attribution
+                    .turn_costs
+                    .get(t_idx)
+                    .and_then(Option::as_ref)
+                    .map_or_else(
+                        || "unpriced".to_string(),
+                        |tc| format_currency_amount(&tc.currency, tc.total_cost),
+                    );
+                let _ = writeln!(
+                    out,
+                    "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} |",
+                    tr.turn,
+                    tr.ts,
+                    model_str,
+                    format_tokens(ta.measured.prompt_tokens()),
+                    format_tokens(ta.measured.fresh_in),
+                    format_tokens(ta.measured.cache_write),
+                    format_tokens(ta.measured.cache_read),
+                    format_tokens(ta.measured.output),
+                    turn_cost_cell,
+                    format_tokens(ta.new_unattributed_prompt_tokens),
+                );
+            }
+        } else {
+            out.push_str(
+                "| Turn | Timestamp | Model | Prompt (P) | Fresh In | Cache Write | Cache Read | Output | Unattributed Delta |\n",
+            );
+            out.push_str("|---:|---|---|---:|---:|---:|---:|---:|---:|\n");
+            for (tr, ta) in report.turns.iter().zip(&report.attribution.turns) {
+                let model_str = tr.model.as_deref().unwrap_or("unknown");
+                let _ = writeln!(
+                    out,
+                    "| {} | `{}` | `{}` | {} | {} | {} | {} | {} | {} |",
+                    tr.turn,
+                    tr.ts,
+                    model_str,
+                    format_tokens(ta.measured.prompt_tokens()),
+                    format_tokens(ta.measured.fresh_in),
+                    format_tokens(ta.measured.cache_write),
+                    format_tokens(ta.measured.cache_read),
+                    format_tokens(ta.measured.output),
+                    format_tokens(ta.new_unattributed_prompt_tokens),
+                );
+            }
         }
     }
 
