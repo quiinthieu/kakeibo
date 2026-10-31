@@ -1,0 +1,93 @@
+{
+  "agent": "codex",
+  "log_files": [
+    "sessions/2026/10/31/rollout-2026-10-31T09-30-00-synth-codex-0001.jsonl"
+  ],
+  "scenario": "basic",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 0,
+      "model": "gpt-5-codex",
+      "session_id": "0018a668-5865-4d4b-8b2f-56b827242e3d",
+      "totals": {
+        "cache_read": 15406,
+        "cache_write": 0,
+        "fresh_in": 3112,
+        "output": 315,
+        "prompt_tokens": 18518,
+        "reasoning": 144,
+        "turns": 2
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 104,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 39,
+              "kind": "tool_use",
+              "tool": "exec_command"
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "gpt-5-codex",
+          "prompt_tokens": 9006,
+          "rate_limit_used_percent": 6.5,
+          "ts": "2026-10-31T09:30:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 6400,
+            "cache_write": 0,
+            "confidence": "measured",
+            "fresh_in": 2606,
+            "output": 140,
+            "reasoning": 64
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 310,
+              "kind": "tool_result",
+              "tool": "exec_command"
+            },
+            {
+              "bytes": 164,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "gpt-5-codex",
+          "prompt_tokens": 9512,
+          "rate_limit_used_percent": 7.25,
+          "ts": "2026-10-31T09:30:08Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 9006,
+            "cache_write": 0,
+            "confidence": "measured",
+            "fresh_in": 506,
+            "output": 175,
+            "reasoning": 80
+          }
+        }
+      ]
+    }
+  ]
+}
