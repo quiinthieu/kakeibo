@@ -2369,6 +2369,70 @@ def gen_claude_heavy_overhead(rng: SplitMix64, seed: int) -> dict[str, bytes]:
     }
 
 
+def gen_litellm_pricing_tiny(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    """Synthetic tiny LiteLLM `model_prices_and_context_window.json` fixture (`PLAN.md` §6.2, T09)."""
+    _ = seed
+    unpriced_embed_slug = f"synth-embed-{rng.hex_id('m', 4)}"
+    doc = {
+        "anthropic/claude-opus-4-5": {
+            "cache_creation_input_token_cost": 0.00000625,
+            "cache_creation_input_token_cost_above_1hr": 0.00001,
+            "cache_read_input_token_cost": 0.0000005,
+            "input_cost_per_token": 0.000005,
+            "litellm_provider": "anthropic",
+            "max_input_tokens": 200000,
+            "mode": "chat",
+            "output_cost_per_token": 0.000025,
+        },
+        "claude-haiku-4-5": {
+            "cache_creation_input_token_cost": 0.00000125,
+            "cache_creation_input_token_cost_above_1hr": 0.000002,
+            "cache_read_input_token_cost": 0.0000001,
+            "input_cost_per_token": 0.000001,
+            "litellm_provider": "anthropic",
+            "max_input_tokens": 200000,
+            "mode": "chat",
+            "output_cost_per_token": 0.000005,
+        },
+        "claude-sonnet-4-5": {
+            "cache_creation_input_token_cost": 0.0000025,
+            "cache_creation_input_token_cost_above_1hr": 0.000004,
+            "cache_read_input_token_cost": 0.0000002,
+            "input_cost_per_token": 0.000002,
+            "litellm_provider": "anthropic",
+            "max_input_tokens": 200000,
+            "mode": "chat",
+            "output_cost_per_token": 0.00001,
+        },
+        "gpt-5-codex": {
+            "cache_read_input_token_cost": 0.00000015,
+            "input_cost_per_token": 0.0000015,
+            "litellm_provider": "openai",
+            "max_input_tokens": 400000,
+            "mode": "chat",
+            "output_cost_per_reasoning_token": 0.000008,
+            "output_cost_per_token": 0.000006,
+        },
+        "sample_spec": {
+            "cache_creation_input_token_cost": 0.0,
+            "cache_read_input_token_cost": 0.0,
+            "input_cost_per_token": 0.0,
+            "litellm_provider": "sample_spec",
+            "max_input_tokens": 0,
+            "mode": "chat",
+            "output_cost_per_token": 0.0,
+        },
+        unpriced_embed_slug: {
+            "litellm_provider": "synthetic",
+            "max_input_tokens": 8192,
+            "mode": "embedding",
+        },
+    }
+    return {
+        "pricing/litellm-tiny.json": dumps_pretty_json(doc),
+    }
+
+
 def generate_all(seed: int) -> dict[str, bytes]:
     rng = SplitMix64(seed)
     files: dict[str, bytes] = {}
@@ -2382,6 +2446,7 @@ def generate_all(seed: int) -> dict[str, bytes]:
         gen_claude_near_full_context,
         gen_claude_cache_miss_storm,
         gen_claude_heavy_overhead,
+        gen_litellm_pricing_tiny,
     ):
         # Derive an independent deterministic sub-seed per scenario so adding new
         # scenarios in later tasks never shifts existing scenario bytes!
