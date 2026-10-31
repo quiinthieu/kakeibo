@@ -17,10 +17,13 @@ kakeibo-core.workspace = true
 kakeibo-index.workspace = true
 kakeibo-parse.workspace = true
 kakeibo-report.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+criterion.workspace = true
 insta.workspace = true
+proptest.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
