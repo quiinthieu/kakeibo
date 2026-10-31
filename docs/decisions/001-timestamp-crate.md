@@ -27,7 +27,7 @@ We need a timestamp representation in `kakeibo-core` that:
 We select **`time` `0.3`** configured with minimal features:
 
 ```toml
-time = { version = "0.3", default-features = false, features = ["formatting", "parsing", "serde-well-known"] }
+time = { version = "0.3", default-features = false, features = ["formatting", "parsing"] }
 ```
 
 And wrap `time::OffsetDateTime` privately inside `kakeibo_core::Timestamp`:

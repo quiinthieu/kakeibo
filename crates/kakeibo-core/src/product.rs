@@ -21,6 +21,9 @@ pub const MENUBAR_CASK: &str = "kakeibo-bar";
 /// macOS bundle identifier for the menu bar application.
 pub const BUNDLE_ID: &str = "io.github.quiinthieu.kakeibo";
 
+/// Versioned NDJSON ledger schema identifier (`docs/ledger-schema.md`).
+pub const LEDGER_SCHEMA_V1: &str = "kakeibo.ledger/1";
+
 /// Package version injected at compile time from workspace Cargo metadata.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -42,6 +45,7 @@ mod tests {
         assert_eq!(HOMEBREW_FORMULA, "kakeibo");
         assert_eq!(MENUBAR_CASK, "kakeibo-bar");
         assert_eq!(BUNDLE_ID, "io.github.quiinthieu.kakeibo");
+        assert_eq!(LEDGER_SCHEMA_V1, "kakeibo.ledger/1");
         assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
         assert!(VERSION.split('.').count() >= 3);
         assert_eq!(version_string(), format!("{BINARY_NAME} {VERSION}"));
