@@ -1,0 +1,34 @@
+---
+source: crates/kakeibo/tests/flags_v1_goldens.rs
+expression: full_golden
+---
+=== claude-code/basic ===
+No flags.
+
+=== codex/basic ===
+No flags.
+
+=== claude-code/resume-cold ===
+[cold-resume] turns=3 (122,110 tokens, measured)
+  Resumed request on turn 3 after a 45m idle gap rewrote 122,110 of 122,150 prompt tokens (99%) into cache.
+  evidence: gap=45m (2,700s), P=122,150 (measured), rewritten=122,110 (measured, 99%), trigger=resume_after_idle_gap; see https://github.com/anthropics/claude-code/issues/100447
+
+=== claude-code/near-full-context ===
+[near-full-context] turns=2..=5 (724,560 tokens, measured)
+  4 consecutive requests on turns 2..=5 ran at up to 95% of the 200,000-token context window, resending 724,560 prompt tokens.
+  evidence: turns=2..=5 (4 requests), model=claude-sonnet-4-5, window=200,000 (catalog), peak_P=190,205 (measured, 95%), tokens_resent=724,560 (measured), cache_read=548,385 (measured)
+
+=== claude-code/tool-bloat ===
+[tool-output-bloat] turns=2..=5 (120,000 tokens, estimated: utf8_bytes_div4_ceil_scaled)
+  Bash tool output from turn 2 (~40,000 tokens) was carried across 3 later requests (turns 2..=5) for ~120,000 carried tokens.
+  evidence: tool=Bash, turns=2..=5, bytes=160,000 (measured), size=40,000 (estimated: utf8_bytes_div4_ceil_scaled), carried_turns=3, carried_cost=120,000 (estimated: utf8_bytes_div4_ceil_scaled; cache_read=80,000, cache_write=40,000, fresh_in=0)
+
+=== claude-code/cache-miss-storm ===
+[cache-miss-storm] turns=2..=4 (45,480 tokens, measured)
+  3 mid-session requests on turns 2..=4 rewrote 45,480 prompt tokens into cache instead of hitting cache (likely mid-session model switch).
+  evidence: turns=2..=4 (3 requests), rewritten=45,480 (measured), cache_read=0 (measured), likely_trigger=mid-session model switch
+
+=== claude-code/heavy-overhead ===
+[heavy-overhead] turns=1 (48,400 tokens, measured)
+  First request on turn 1 started with 48,400 prompt tokens before conversation growth (~48,376 fixed overhead tokens).
+  evidence: turn=1, P(1)=48,400 (measured), fixed_overhead=48,376 (estimated: utf8_bytes_div4_ceil_scaled); try `bentoctx budget`
