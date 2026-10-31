@@ -1,0 +1,131 @@
+{
+  "agent": "claude-code",
+  "log_files": [
+    "projects/-synthetic-workspace-alpha/session-basic-0001.jsonl"
+  ],
+  "scenario": "basic",
+  "schema": "kakeibo.fixture-ground-truth/1",
+  "seed": 42,
+  "sessions": [
+    {
+      "ignored_records": 2,
+      "model": "claude-sonnet-4-5",
+      "session_id": "57e1faba-6510-4204-b4ab-d143feb24055",
+      "totals": {
+        "cache_read": 19868,
+        "cache_write": 10064,
+        "fresh_in": 683,
+        "output": 282,
+        "prompt_tokens": 30615,
+        "reasoning": 40,
+        "turns": 3
+      },
+      "turns": [
+        {
+          "added_blocks": [
+            {
+              "bytes": 96,
+              "kind": "user_prompt",
+              "tool": null
+            },
+            {
+              "bytes": 112,
+              "kind": "assistant_text",
+              "tool": null
+            },
+            {
+              "bytes": 53,
+              "kind": "tool_use",
+              "tool": "Read"
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 9732,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T09:00:04Z",
+          "turn": 1,
+          "usage": {
+            "cache_read": 0,
+            "cache_write": 9400,
+            "confidence": "measured",
+            "fresh_in": 332,
+            "output": 84,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 380,
+              "kind": "tool_result",
+              "tool": "Read"
+            },
+            {
+              "bytes": 67,
+              "kind": "tool_use",
+              "tool": "Bash"
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 10344,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T09:00:09Z",
+          "turn": 2,
+          "usage": {
+            "cache_read": 9732,
+            "cache_write": 404,
+            "confidence": "measured",
+            "fresh_in": 208,
+            "output": 62,
+            "reasoning": null
+          }
+        },
+        {
+          "added_blocks": [
+            {
+              "bytes": 220,
+              "kind": "tool_result",
+              "tool": "Bash"
+            },
+            {
+              "bytes": 180,
+              "kind": "assistant_text",
+              "tool": null
+            }
+          ],
+          "hints": {
+            "api_error": false,
+            "compaction": false,
+            "resume_start": false,
+            "sidechain": false
+          },
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 10539,
+          "rate_limit_used_percent": null,
+          "ts": "2026-10-31T09:00:16Z",
+          "turn": 3,
+          "usage": {
+            "cache_read": 10136,
+            "cache_write": 260,
+            "confidence": "measured",
+            "fresh_in": 143,
+            "output": 136,
+            "reasoning": 40
+          }
+        }
+      ]
+    }
+  ]
+}

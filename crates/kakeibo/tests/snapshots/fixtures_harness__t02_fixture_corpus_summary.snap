@@ -1,0 +1,66 @@
+---
+source: crates/kakeibo/tests/fixtures_harness.rs
+expression: entries
+---
+[
+  {
+    "agent": "claude-code",
+    "scenario": "basic",
+    "session_id": "57e1faba-6510-4204-b4ab-d143feb24055",
+    "ignored_records": 2,
+    "totals": {
+      "turns": 3,
+      "prompt_tokens": 30615,
+      "fresh_in": 683,
+      "cache_write": 10064,
+      "cache_read": 19868,
+      "output": 282,
+      "reasoning": 40
+    }
+  },
+  {
+    "agent": "claude-code",
+    "scenario": "streaming-dupes",
+    "session_id": "fc991bca-1a1a-41ae-8f04-82a72b57ee7d",
+    "ignored_records": 0,
+    "totals": {
+      "turns": 2,
+      "prompt_tokens": 23762,
+      "fresh_in": 622,
+      "cache_write": 11510,
+      "cache_read": 11630,
+      "output": 205,
+      "reasoning": 0
+    }
+  },
+  {
+    "agent": "codex",
+    "scenario": "basic",
+    "session_id": "0018a668-5865-4d4b-8b2f-56b827242e3d",
+    "ignored_records": 0,
+    "totals": {
+      "turns": 2,
+      "prompt_tokens": 18518,
+      "fresh_in": 3112,
+      "cache_write": 0,
+      "cache_read": 15406,
+      "output": 315,
+      "reasoning": 144
+    }
+  },
+  {
+    "agent": "codex",
+    "scenario": "codex-dual-usage",
+    "session_id": "3304d23d-b2a8-4503-baed-7332b91656d8",
+    "ignored_records": 1,
+    "totals": {
+      "turns": 2,
+      "prompt_tokens": 24663,
+      "fresh_in": 3643,
+      "cache_write": 0,
+      "cache_read": 21020,
+      "output": 400,
+      "reasoning": 188
+    }
+  }
+]
