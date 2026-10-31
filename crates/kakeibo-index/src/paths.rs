@@ -82,4 +82,10 @@ impl AppPaths {
     pub fn user_pricing_path(&self) -> PathBuf {
         self.config_dir.join("pricing.toml")
     }
+
+    /// Path to the incremental derived-record SQLite index (`<cache_dir>/index.sqlite`).
+    #[must_use]
+    pub fn index_db_path(&self) -> PathBuf {
+        self.cache_dir.join("index.sqlite")
+    }
 }
