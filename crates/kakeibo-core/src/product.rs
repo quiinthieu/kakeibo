@@ -24,6 +24,9 @@ pub const BUNDLE_ID: &str = "io.github.quiinthieu.kakeibo";
 /// Versioned NDJSON ledger schema identifier (`docs/ledger-schema.md`).
 pub const LEDGER_SCHEMA_V1: &str = "kakeibo.ledger/1";
 
+/// Versioned CLI JSON export schema number (`docs/cli-schema.md`).
+pub const CLI_EXPORT_SCHEMA_VERSION: u32 = 1;
+
 /// Package version injected at compile time from workspace Cargo metadata.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

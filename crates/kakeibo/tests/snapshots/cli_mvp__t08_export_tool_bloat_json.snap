@@ -1,0 +1,566 @@
+---
+source: crates/kakeibo/tests/cli_mvp.rs
+expression: raw_stdout
+---
+{
+  "schemaVersion": 1,
+  "generator": {
+    "name": "kakeibo",
+    "version": "0.1.0"
+  },
+  "session_count": 1,
+  "sessions": [
+    {
+      "agent": "claude-code",
+      "session_id": "9162aea6-bfa4-43d5-9ae7-fbbacaceafa7",
+      "turn_count": 5,
+      "started_at": "2026-10-31T09:10:04Z",
+      "ended_at": "2026-10-31T09:22:42Z",
+      "models": [
+        "claude-sonnet-4-5"
+      ],
+      "project_hash": "ae84a7a4492c0056",
+      "cost": {
+        "status": "unpriced",
+        "usd": null
+      },
+      "totals": {
+        "prompt_tokens": 210590,
+        "total_tokens": 210725,
+        "fresh_in": 130,
+        "cache_write": 100200,
+        "cache_read": 110260,
+        "output": 135,
+        "confidence": "measured"
+      },
+      "fixed_overhead": {
+        "tokens": 10000,
+        "confidence": "estimated",
+        "estimation_method": "utf8_bytes_div4_ceil_scaled"
+      },
+      "categories": {
+        "confidence": "estimated",
+        "estimation_method": "utf8_bytes_div4_ceil_scaled",
+        "breakdown": {
+          "fixed_overhead": {
+            "prompt_tokens": 50000,
+            "total_tokens": 50000,
+            "fresh_in": 0,
+            "cache_write": 20000,
+            "cache_read": 30000,
+            "output": 0,
+            "share_bps": 2372
+          },
+          "resent_history": {
+            "prompt_tokens": 80260,
+            "total_tokens": 80260,
+            "fresh_in": 0,
+            "cache_write": 0,
+            "cache_read": 80260,
+            "output": 0,
+            "share_bps": 3808
+          },
+          "tool_output": {
+            "prompt_tokens": 80040,
+            "total_tokens": 80040,
+            "fresh_in": 0,
+            "cache_write": 80040,
+            "cache_read": 0,
+            "output": 0,
+            "share_bps": 3798
+          },
+          "retries": {
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+            "fresh_in": 0,
+            "cache_write": 0,
+            "cache_read": 0,
+            "output": 0,
+            "share_bps": 0
+          },
+          "user_input": {
+            "prompt_tokens": 150,
+            "total_tokens": 150,
+            "fresh_in": 82,
+            "cache_write": 68,
+            "cache_read": 0,
+            "output": 0,
+            "share_bps": 7
+          },
+          "assistant_output": {
+            "prompt_tokens": 140,
+            "total_tokens": 275,
+            "fresh_in": 48,
+            "cache_write": 92,
+            "cache_read": 0,
+            "output": 135,
+            "share_bps": 13
+          },
+          "subagents": {
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+            "fresh_in": 0,
+            "cache_write": 0,
+            "cache_read": 0,
+            "output": 0,
+            "share_bps": 0
+          },
+          "compaction": {
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+            "fresh_in": 0,
+            "cache_write": 0,
+            "cache_read": 0,
+            "output": 0,
+            "share_bps": 0
+          },
+          "unattributed": {
+            "prompt_tokens": 0,
+            "total_tokens": 0,
+            "fresh_in": 0,
+            "cache_write": 0,
+            "cache_read": 0,
+            "output": 0,
+            "share_bps": 0
+          }
+        }
+      },
+      "flags": [
+        {
+          "id": "tool-output-bloat",
+          "turn_range": {
+            "start": 2,
+            "end": 5
+          },
+          "impact_tokens": 120000,
+          "confidence": "estimated",
+          "estimation_method": "utf8_bytes_div4_ceil_scaled",
+          "sentence": "Bash tool output from turn 2 (~40,000 tokens) was carried across 3 later requests (turns 2..=5) for ~120,000 carried tokens.",
+          "evidence_text": "evidence: tool=Bash, turns=2..=5, bytes=160,000 (measured), size=40,000 (estimated: utf8_bytes_div4_ceil_scaled), carried_turns=3, carried_cost=120,000 (estimated: utf8_bytes_div4_ceil_scaled; cache_read=80,000, cache_write=40,000, fresh_in=0)",
+          "evidence": {
+            "kind": "tool-output-bloat",
+            "tool": "Bash",
+            "source_turn": 2,
+            "bytes": 160000,
+            "size_tokens": 40000,
+            "carried_turns": 3,
+            "carried_tokens": 120000,
+            "carried_split": {
+              "fresh_in": 0,
+              "cache_write": 40000,
+              "cache_read": 80000,
+              "output": 0
+            }
+          }
+        }
+      ],
+      "tools": [
+        {
+          "tool": "Bash",
+          "calls": 1,
+          "results": 1,
+          "errors": 0,
+          "bytes": 160080,
+          "initial_tokens": 40020,
+          "carried_tokens": 120060,
+          "lifetime_tokens": 160080,
+          "confidence": "estimated",
+          "estimation_method": "utf8_bytes_div4_ceil_scaled"
+        }
+      ],
+      "subagents": [],
+      "turns": [
+        {
+          "turn": 1,
+          "ts": "2026-10-31T09:10:04Z",
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 10020,
+          "measured": {
+            "fresh_in": 20,
+            "cache_write": 10000,
+            "cache_read": 0,
+            "output": 50
+          },
+          "measured_confidence": "measured",
+          "categories": {
+            "fixed_overhead": {
+              "fresh_in": 0,
+              "cache_write": 10000,
+              "cache_read": 0,
+              "output": 0
+            },
+            "resent_history": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "tool_output": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "retries": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "user_input": {
+              "fresh_in": 20,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "assistant_output": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 50
+            },
+            "subagents": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "compaction": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "unattributed": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            }
+          },
+          "category_confidence": "estimated",
+          "estimation_method": "utf8_bytes_div4_ceil_scaled",
+          "new_unattributed_prompt_tokens": 0,
+          "hints": {
+            "resume_start": false,
+            "compaction": false,
+            "sidechain": false,
+            "api_error": false
+          }
+        },
+        {
+          "turn": 2,
+          "ts": "2026-10-31T09:10:12Z",
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 50070,
+          "measured": {
+            "fresh_in": 0,
+            "cache_write": 40050,
+            "cache_read": 10020,
+            "output": 20
+          },
+          "measured_confidence": "measured",
+          "categories": {
+            "fixed_overhead": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 10000,
+              "output": 0
+            },
+            "resent_history": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 20,
+              "output": 0
+            },
+            "tool_output": {
+              "fresh_in": 0,
+              "cache_write": 40020,
+              "cache_read": 0,
+              "output": 0
+            },
+            "retries": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "user_input": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "assistant_output": {
+              "fresh_in": 0,
+              "cache_write": 30,
+              "cache_read": 0,
+              "output": 20
+            },
+            "subagents": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "compaction": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "unattributed": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            }
+          },
+          "category_confidence": "estimated",
+          "estimation_method": "utf8_bytes_div4_ceil_scaled",
+          "new_unattributed_prompt_tokens": 0,
+          "hints": {
+            "resume_start": false,
+            "compaction": false,
+            "sidechain": false,
+            "api_error": false
+          }
+        },
+        {
+          "turn": 3,
+          "ts": "2026-10-31T09:10:20Z",
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 50120,
+          "measured": {
+            "fresh_in": 20,
+            "cache_write": 30,
+            "cache_read": 50070,
+            "output": 20
+          },
+          "measured_confidence": "measured",
+          "categories": {
+            "fixed_overhead": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 10000,
+              "output": 0
+            },
+            "resent_history": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 40070,
+              "output": 0
+            },
+            "tool_output": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "retries": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "user_input": {
+              "fresh_in": 12,
+              "cache_write": 18,
+              "cache_read": 0,
+              "output": 0
+            },
+            "assistant_output": {
+              "fresh_in": 8,
+              "cache_write": 12,
+              "cache_read": 0,
+              "output": 20
+            },
+            "subagents": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "compaction": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "unattributed": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            }
+          },
+          "category_confidence": "estimated",
+          "estimation_method": "utf8_bytes_div4_ceil_scaled",
+          "new_unattributed_prompt_tokens": 0,
+          "hints": {
+            "resume_start": false,
+            "compaction": false,
+            "sidechain": false,
+            "api_error": false
+          }
+        },
+        {
+          "turn": 4,
+          "ts": "2026-10-31T09:22:30Z",
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 50170,
+          "measured": {
+            "fresh_in": 50,
+            "cache_write": 50120,
+            "cache_read": 0,
+            "output": 20
+          },
+          "measured_confidence": "measured",
+          "categories": {
+            "fixed_overhead": {
+              "fresh_in": 0,
+              "cache_write": 10000,
+              "cache_read": 0,
+              "output": 0
+            },
+            "resent_history": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "tool_output": {
+              "fresh_in": 0,
+              "cache_write": 40020,
+              "cache_read": 0,
+              "output": 0
+            },
+            "retries": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "user_input": {
+              "fresh_in": 30,
+              "cache_write": 50,
+              "cache_read": 0,
+              "output": 0
+            },
+            "assistant_output": {
+              "fresh_in": 20,
+              "cache_write": 50,
+              "cache_read": 0,
+              "output": 20
+            },
+            "subagents": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "compaction": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "unattributed": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            }
+          },
+          "category_confidence": "estimated",
+          "estimation_method": "utf8_bytes_div4_ceil_scaled",
+          "new_unattributed_prompt_tokens": 0,
+          "hints": {
+            "resume_start": false,
+            "compaction": false,
+            "sidechain": false,
+            "api_error": false
+          }
+        },
+        {
+          "turn": 5,
+          "ts": "2026-10-31T09:22:42Z",
+          "model": "claude-sonnet-4-5",
+          "prompt_tokens": 50210,
+          "measured": {
+            "fresh_in": 40,
+            "cache_write": 0,
+            "cache_read": 50170,
+            "output": 25
+          },
+          "measured_confidence": "measured",
+          "categories": {
+            "fixed_overhead": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 10000,
+              "output": 0
+            },
+            "resent_history": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 40170,
+              "output": 0
+            },
+            "tool_output": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "retries": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "user_input": {
+              "fresh_in": 20,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "assistant_output": {
+              "fresh_in": 20,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 25
+            },
+            "subagents": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "compaction": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            },
+            "unattributed": {
+              "fresh_in": 0,
+              "cache_write": 0,
+              "cache_read": 0,
+              "output": 0
+            }
+          },
+          "category_confidence": "estimated",
+          "estimation_method": "utf8_bytes_div4_ceil_scaled",
+          "new_unattributed_prompt_tokens": 0,
+          "hints": {
+            "resume_start": false,
+            "compaction": false,
+            "sidechain": false,
+            "api_error": false
+          }
+        }
+      ]
+    }
+  ]
+}

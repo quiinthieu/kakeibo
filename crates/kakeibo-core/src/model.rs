@@ -368,3 +368,27 @@ impl fmt::Display for Category {
         f.write_str(self.as_str())
     }
 }
+
+/// Error returned when parsing an unknown [`Category`] slug.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown attribution category `{0}`")]
+pub struct UnknownCategoryError(pub String);
+
+impl FromStr for Category {
+    type Err = UnknownCategoryError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "fixed_overhead" | "fixed-overhead" => Ok(Self::FixedOverhead),
+            "resent_history" | "resent-history" => Ok(Self::ResentHistory),
+            "tool_output" | "tool-output" => Ok(Self::ToolOutput),
+            "retries" => Ok(Self::Retries),
+            "user_input" | "user-input" => Ok(Self::UserInput),
+            "assistant_output" | "assistant-output" => Ok(Self::AssistantOutput),
+            "subagents" => Ok(Self::Subagents),
+            "compaction" => Ok(Self::Compaction),
+            "unattributed" => Ok(Self::Unattributed),
+            other => Err(UnknownCategoryError(other.to_string())),
+        }
+    }
+}

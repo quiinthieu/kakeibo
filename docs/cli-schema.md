@@ -130,7 +130,7 @@ Items are ranked by `impact_tokens` descending, tie-broken by `turn_range` ascen
 | `estimation_method` | `string` | no | Present when `confidence == "estimated"`; omitted otherwise. |
 | `sentence` | `string` | yes | Plain-words one-sentence summary (`kakeibo_report::flags::render_flag_sentence`). |
 | `evidence_text` | `string` | yes | Provenance-labelled evidence line (`kakeibo_report::flags::render_flag_evidence`). |
-| `evidence` | `object` (`FlagEvidence`) | yes | Structured evidence payload tagged with `"kind"` (`"cold_resume"`, `"near_full_context"`, `"tool_output_bloat"`, `"cache_miss_storm"`, `"heavy_overhead"`). |
+| `evidence` | `object` (`FlagEvidence`) | yes | Structured evidence payload tagged with `"kind"` (`"cold-resume"`, `"near-full-context"`, `"tool-output-bloat"`, `"cache-miss-storm"`, `"heavy-overhead"`). |
 
 ---
 
