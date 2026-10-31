@@ -19,7 +19,7 @@
 | Location / Variable | Role | Source |
 |---|---|---|
 | `~/.claude/projects/<cwd-slug>/<session>.jsonl` | Primary top-level session transcript (UTF-8 NDJSON, one JSON object per line). `<cwd-slug>` replaces `/` with `-` (e.g. `-synthetic-workspace-alpha`). | [S1], [S2], [S3] |
-| `~/.claude/projects/<cwd-slug>/<session>/subagents/*.jsonl` | Child subagent transcripts scoped to `<session>` (`isSidechain: true`). Top-level discovery must not blindly flatten these into parent sessions without attribution. | [S1], [S2] |
+| `~/.claude/projects/<cwd-slug>/<session>/subagents/*.jsonl` | Child subagent transcripts scoped to `<session>` (`isSidechain: true`). Verified on `2.1.314` that lines inside `subagents/*.jsonl` carry the **parent** `<session>` UUID in `sessionId` alongside `agentId`; top-level discovery therefore restricts primary sessions to `<cwd-slug>/<session>.jsonl` (`PLAN.md` §5) while classifying `subagents/*.jsonl` separately with `parent_session_id = <session>`. | [S1], [S2] |
 | `CLAUDE_CONFIG_DIR` | Optional environment override replacing `~/.claude` as the root configuration/projects directory. | [S1], [S2] |
 
 ## Observed Top-Level `type` Values (`2.1.314`)
@@ -45,13 +45,20 @@ Children inside opaque tool-argument maps (`message.content[].input.*`) and file
 | `timestamp` | `string` | RFC 3339 / ISO-8601 UTC event timestamp. | [S1], [S2], [S4] |
 | `cwd` | `string` | Working directory at the time of the event (hashed to `cwd_hash` at parse time; raw path dropped). | [S1], [S2], [S4] |
 | `version` | `string` | Claude Code CLI version string that wrote the record. | [S1], [S2], [S4] |
-| `isSidechain` | `boolean` | `true` for subagent / sidechain turns. | [S1], [S2], [S4] |
+| `isSidechain` | `boolean` | `true` for subagent / sidechain turns (`TurnHints.sidechain`). | [S1], [S2], [S4] |
+| `agentId` | `string` | Subagent identifier present on lines inside `<session>/subagents/*.jsonl` (`isSidechain: true`). | [S1] |
 | `gitBranch` | `string` | Current Git branch recorded by Claude Code (dropped at parse time). | [S1], [S4] |
 | `userType` | `string` | User classification marker (e.g. `"external"`). | [S1], [S4] |
 | `isMeta` | `boolean` | `true` on synthetic/injected `user` or `system` meta lines. | [S1], [S4] |
+| `isCompactSummary` | `boolean` | `true` on `user` records carrying a post-compaction summary payload (`BlockKind::CompactionSummary` + `TurnHints.compaction`). | [S1], [S4] |
+| `isApiErrorMessage` | `boolean` | `true` on synthetic `assistant` error lines; zero-token (`P == 0 && output == 0`) error lines set `TurnHints.api_error` on the subsequent retried request, while billed error responses set `TurnHints.api_error` directly. | [S1] |
+| `apiError` | `string \| object` | Optional API error descriptor on `assistant` error lines (presence marks `TurnHints.api_error`; raw payload dropped). | [S1] |
+| `error` | `string \| object` | Optional error descriptor on `assistant` error lines (presence marks `TurnHints.api_error`; raw payload dropped). | [S1] |
 | `sourceToolUseID` | `string` | Optional link on `user` tool-result records back to the originating `tool_use` ID. | [S1] |
 | `requestId` | `string` | Anthropic API request identifier on `assistant` records; primary streaming deduplication key alongside `message.id`. | [S1], [S2], [S5] |
-| `subtype` | `string` | Subtype discriminator on `system` records (e.g. `"turn_duration"`, `"compact_boundary"`). | [S1], [S2], [S4] |
+| `subtype` | `string` | Subtype discriminator on `system` records (`"turn_duration"`, `"compact_boundary"`, `"away_summary"`, `"stop_hook_summary"`, `"bridge_status"`, `"informational"`, `"local_command"`, `"api_error"`). | [S1], [S2], [S4] |
+| `logicalParentUuid` | `string` | Pre-compaction logical parent event UUID on `system` (`subtype == "compact_boundary"`) records where `parentUuid` resets to `null`. | [S1] |
+| `compactMetadata` | `object` | Compaction summary metadata on `system` (`subtype == "compact_boundary"`) records (skipped; triggers `TurnHints.compaction`). | [S1] |
 | `durationMs` | `integer` | Turn wall-clock duration in milliseconds on `system` (`subtype == "turn_duration"`) records. | [S1] |
 | `messageId` | `string` | Target message UUID on `file-history-snapshot` non-turn records. | [S1], [S3] |
 | `isSnapshotUpdate` | `boolean` | Snapshot update flag on `file-history-snapshot` records. | [S1], [S3] |
@@ -101,3 +108,8 @@ Children inside opaque tool-argument maps (`message.content[].input.*`) and file
 2. **Streaming duplicate consolidation** ([S1], [S5]):
    - Claude Code writes one `assistant` JSONL line per streamed content block (`thinking`, `text`, `tool_use`) for a single API call; all lines for that call share `(message.id, requestId)`.
    - Intermediate chunks may report partial `output_tokens` (`ccusage#938` [S5]). Decoders group by `(message.id, requestId)` (falling back to `message.id` or `requestId` if only one is present), keep **`max(output_tokens)`** (never first-seen and never the sum), and merge distinct content blocks in order.
+3. **Turn hints (`TurnHints`)** ([S1], [S2], [S4]):
+   - `compaction`: set when preceded by `system` (`subtype == "compact_boundary"`) or a `user` record with `isCompactSummary == true` (whose block is classified as `BlockKind::CompactionSummary`).
+   - `resume_start`: set on the first turn following `system` (`subtype == "away_summary"`), a mid-session `parentUuid == null` root reset without compaction, or a mid-file `sessionId` fork transition.
+   - `sidechain`: set when `isSidechain == true` on any chunk of the turn (or when decoding `<session>/subagents/*.jsonl`).
+   - `api_error`: zero-token (`P == 0 && output == 0`) `assistant` error lines (`isApiErrorMessage == true`, `apiError`, or `error`) are counted as non-turn records and set `api_error = true` on the subsequent retried request; billed error turns set `api_error = true` directly.
