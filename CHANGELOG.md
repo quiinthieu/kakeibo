@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Pure API-equivalent pricing engine (`kakeibo-core::pricing`: `PricingCatalog`, `ModelPriceEntry`, `RateUnit`, `CostStatus`, `CacheWriteTierTokens`, `TurnCostBreakdown`, `SessionCostAttribution`, `price_session`, `import_litellm_json_str`) supporting `5m`/`1h` prompt-cache write tier splits, reasoning-token rate splits, exact per-turn and per-category cost reconciliation, offline LiteLLM `model_prices_and_context_window.json` import, and bundled empty-rate placeholder defaults (`data/pricing.toml`, `docs/formats/litellm-pricing.md`) (T09).
+- Sole-writer user pricing overlay store (`kakeibo-index::{AppPaths, load_effective_pricing, save_user_pricing}`) with atomic write-and-rename inside Kakeibo's own config directory, `kakeibo pricing list | check | import <file>` CLI subcommands, per-turn and per-category cost rendering across terminal tables, Markdown reports, and `schemaVersion: 1` JSON exports (never displaying `$0` for unpriced models), and CI static price-literal enforcement (`scripts/lint-pricing.sh`, `tests/fixtures/pricing/litellm-tiny.json`) (T09).
+
 ## [0.1.0] - 2026-10-31
 
 ### Added

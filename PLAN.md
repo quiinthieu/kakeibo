@@ -211,7 +211,7 @@ Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claud
   *AC:* `assert_cmd` per subcommand; JSON matches `cli-schema.md`; Markdown pathless by default; `v0.1.0`.
 
 ### M2 Cost, more agents, scale
-- [ ] **T09 Pricing as config.** Schemas with `source`/`checked`, empty defaults, `pricing list|check|import`, per-category/turn cost, 5m/1h write split.
+- [x] **T09 Pricing as config.** Schemas with `source`/`checked`, empty defaults, `pricing list|check|import`, per-category/turn cost, 5m/1h write split.
   *AC:* no price literals in code (lint); unpriced never shows $0; import tested on a tiny synthetic LiteLLM-shaped file.
 - [ ] **T10 Gemini CLI + opencode.** JSONL/JSON with rewind/patch and slug registry; read-only SQLite + legacy tree.
   *AC:* scenarios match ground truth; DB unchanged (hash + mtime) while another connection holds a write lock.
