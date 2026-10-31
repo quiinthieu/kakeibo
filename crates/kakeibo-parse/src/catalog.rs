@@ -1,6 +1,6 @@
 //! Read-only per-agent log discovery (`PathCatalog`) and file opening helpers (`PLAN.md` §0 #5, §3.1, §5).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
@@ -34,6 +34,14 @@ pub struct PathCatalog {
     gemini_cli_home: Option<PathBuf>,
     xdg_data_home: Option<PathBuf>,
     opencode_data_dir: Option<PathBuf>,
+    aider_home: Option<PathBuf>,
+    aider_chat_history_file: Option<PathBuf>,
+    aider_analytics_log: Option<PathBuf>,
+    current_dir: Option<PathBuf>,
+    xdg_config_home: Option<PathBuf>,
+    appdata_dir: Option<PathBuf>,
+    cursor_state_db: Option<PathBuf>,
+    cursor_global_storage_dir: Option<PathBuf>,
 }
 
 fn non_empty_env_path(key: &str) -> Option<PathBuf> {
@@ -200,6 +208,14 @@ impl PathCatalog {
             gemini_cli_home: None,
             xdg_data_home: None,
             opencode_data_dir: None,
+            aider_home: None,
+            aider_chat_history_file: None,
+            aider_analytics_log: None,
+            current_dir: None,
+            xdg_config_home: None,
+            appdata_dir: None,
+            cursor_state_db: None,
+            cursor_global_storage_dir: None,
         }
     }
 
@@ -224,6 +240,59 @@ impl PathCatalog {
         self
     }
 
+    /// Overrides `AIDER_HOME` (`~/.aider`) on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_aider_home(mut self, aider_home: Option<PathBuf>) -> Self {
+        self.aider_home = aider_home;
+        self
+    }
+
+    /// Overrides `AIDER_CHAT_HISTORY_FILE` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_aider_chat_history_file(mut self, history_file: Option<PathBuf>) -> Self {
+        self.aider_chat_history_file = history_file;
+        self
+    }
+
+    /// Overrides `AIDER_ANALYTICS_LOG` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_aider_analytics_log(mut self, analytics_log: Option<PathBuf>) -> Self {
+        self.aider_analytics_log = analytics_log;
+        self
+    }
+
+    /// Overrides the working directory used for upward enclosing-repository `.aider.chat.history.md`
+    /// discovery.
+    #[must_use]
+    pub fn with_current_dir(mut self, current_dir: Option<PathBuf>) -> Self {
+        self.current_dir = current_dir;
+        self
+    }
+
+    /// Overrides `XDG_CONFIG_HOME` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_xdg_config_home(mut self, xdg_config_home: Option<PathBuf>) -> Self {
+        self.xdg_config_home = xdg_config_home;
+        self
+    }
+
+    /// Overrides `CURSOR_STATE_DB` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_cursor_state_db(mut self, cursor_state_db: Option<PathBuf>) -> Self {
+        self.cursor_state_db = cursor_state_db;
+        self
+    }
+
+    /// Overrides `CURSOR_GLOBAL_STORAGE_DIR` on this [`PathCatalog`].
+    #[must_use]
+    pub fn with_cursor_global_storage_dir(
+        mut self,
+        cursor_global_storage_dir: Option<PathBuf>,
+    ) -> Self {
+        self.cursor_global_storage_dir = cursor_global_storage_dir;
+        self
+    }
+
     /// Creates a [`PathCatalog`] populated from standard process environment variables.
     #[must_use]
     pub fn from_env() -> Self {
@@ -234,6 +303,14 @@ impl PathCatalog {
         let xdg_data_home =
             non_empty_env_path("XDG_DATA_HOME").or_else(|| non_empty_env_path("LOCALAPPDATA"));
         let opencode_data_dir = non_empty_env_path("OPENCODE_DATA_DIR");
+        let aider_home = non_empty_env_path("AIDER_HOME");
+        let aider_chat_history_file = non_empty_env_path("AIDER_CHAT_HISTORY_FILE");
+        let aider_analytics_log = non_empty_env_path("AIDER_ANALYTICS_LOG");
+        let current_dir = env::current_dir().ok();
+        let xdg_config_home = non_empty_env_path("XDG_CONFIG_HOME");
+        let appdata_dir = non_empty_env_path("APPDATA");
+        let cursor_state_db = non_empty_env_path("CURSOR_STATE_DB");
+        let cursor_global_storage_dir = non_empty_env_path("CURSOR_GLOBAL_STORAGE_DIR");
         Self {
             home_dir,
             claude_config_dir,
@@ -241,6 +318,14 @@ impl PathCatalog {
             gemini_cli_home,
             xdg_data_home,
             opencode_data_dir,
+            aider_home,
+            aider_chat_history_file,
+            aider_analytics_log,
+            current_dir,
+            xdg_config_home,
+            appdata_dir,
+            cursor_state_db,
+            cursor_global_storage_dir,
         }
     }
 
@@ -494,6 +579,263 @@ impl PathCatalog {
         logs.sort();
         Ok(logs)
     }
+
+    /// Resolves the user-level Aider directory (`AIDER_HOME` or `~/.aider`).
+    #[must_use]
+    pub fn aider_root(&self) -> Option<PathBuf> {
+        if let Some(override_dir) = &self.aider_home {
+            if !override_dir.as_os_str().is_empty() {
+                return Some(override_dir.clone());
+            }
+        }
+        self.home_dir.as_ref().map(|home| home.join(".aider"))
+    }
+
+    /// Returns any explicit `AIDER_CHAT_HISTORY_FILE` override configured on this catalog.
+    #[must_use]
+    pub fn aider_chat_history_override(&self) -> Option<&Path> {
+        self.aider_chat_history_file
+            .as_deref()
+            .filter(|p| !p.as_os_str().is_empty())
+    }
+
+    /// Returns any explicit `AIDER_ANALYTICS_LOG` override configured on this catalog.
+    #[must_use]
+    pub fn aider_analytics_log_override(&self) -> Option<&Path> {
+        self.aider_analytics_log
+            .as_deref()
+            .filter(|p| !p.as_os_str().is_empty())
+    }
+
+    /// Discovers Aider `.aider.chat.history.md` transcripts from:
+    /// 1. `AIDER_CHAT_HISTORY_FILE` (when set),
+    /// 2. `<aider_root>` (`~/.aider`) up to bounded depth 2, and
+    /// 3. upward ancestor directories from `current_dir` up to the enclosing `.git` root
+    ///    (stopping before `home_dir`, never recursively scanning `$HOME`).
+    pub fn discover_aider_histories(&self) -> io::Result<Vec<DiscoveredLog>> {
+        let mut seen = BTreeSet::new();
+        let mut logs = Vec::new();
+
+        let mut push_unique = |candidate: PathBuf| {
+            if candidate.is_file() {
+                let key = fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+                if seen.insert(key) {
+                    logs.push(DiscoveredLog {
+                        agent: AgentId::Aider,
+                        path: candidate,
+                    });
+                }
+            }
+        };
+
+        if let Some(explicit) = self.aider_chat_history_override() {
+            push_unique(explicit.to_path_buf());
+        }
+
+        if let Some(root) = self.aider_root() {
+            let mut found = Vec::new();
+            collect_bounded_files(&root, 2, is_aider_history_filename, &mut found)?;
+            for path in found {
+                push_unique(path);
+            }
+        }
+
+        for ancestor in self.enclosing_repo_ancestors() {
+            push_unique(ancestor.join(".aider.chat.history.md"));
+        }
+
+        logs.sort();
+        Ok(logs)
+    }
+
+    /// Discovers opt-in Aider `--analytics-log` JSONL files from:
+    /// 1. `AIDER_ANALYTICS_LOG` (when set),
+    /// 2. `<aider_root>` (`~/.aider`) up to bounded depth 2, and
+    /// 3. upward ancestor directories from `current_dir` (`.aider.analytics.jsonl`).
+    pub fn discover_aider_analytics_logs(&self) -> io::Result<Vec<DiscoveredLog>> {
+        let mut seen = BTreeSet::new();
+        let mut logs = Vec::new();
+
+        let mut push_unique = |candidate: PathBuf| {
+            if candidate.is_file() {
+                let key = fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+                if seen.insert(key) {
+                    logs.push(DiscoveredLog {
+                        agent: AgentId::Aider,
+                        path: candidate,
+                    });
+                }
+            }
+        };
+
+        if let Some(explicit) = self.aider_analytics_log_override() {
+            push_unique(explicit.to_path_buf());
+        }
+
+        if let Some(root) = self.aider_root() {
+            let mut found = Vec::new();
+            collect_bounded_files(&root, 2, is_aider_analytics_filename, &mut found)?;
+            for path in found {
+                push_unique(path);
+            }
+        }
+
+        for ancestor in self.enclosing_repo_ancestors() {
+            push_unique(ancestor.join(".aider.analytics.jsonl"));
+        }
+
+        logs.sort();
+        Ok(logs)
+    }
+
+    /// Returns ordered candidate paths for Cursor's `state.vscdb` across explicit overrides
+    /// (`CURSOR_STATE_DB`, `CURSOR_GLOBAL_STORAGE_DIR`) and macOS, Linux, and Windows
+    /// `globalStorage` layouts.
+    #[must_use]
+    pub fn cursor_candidate_state_dbs(&self) -> Vec<PathBuf> {
+        if let Some(explicit_db) = self
+            .cursor_state_db
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            return vec![explicit_db.clone()];
+        }
+        if let Some(storage_dir) = self
+            .cursor_global_storage_dir
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            return vec![storage_dir.join("state.vscdb")];
+        }
+
+        let mut candidates = Vec::with_capacity(4);
+        if let Some(home) = &self.home_dir {
+            candidates.push(
+                home.join("Library/Application Support/Cursor/User/globalStorage/state.vscdb"),
+            );
+            candidates.push(home.join(".config/Cursor/User/globalStorage/state.vscdb"));
+        }
+        if let Some(xdg_cfg) = self
+            .xdg_config_home
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            candidates.push(xdg_cfg.join("Cursor/User/globalStorage/state.vscdb"));
+        }
+        if let Some(appdata) = self
+            .appdata_dir
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            candidates.push(appdata.join("Cursor/User/globalStorage/state.vscdb"));
+        }
+        candidates
+    }
+
+    /// Returns `true` when any Cursor `globalStorage` directory or `state.vscdb` file exists.
+    #[must_use]
+    pub fn cursor_root_exists(&self) -> bool {
+        self.cursor_candidate_state_dbs()
+            .iter()
+            .any(|db| db.is_file() || db.parent().is_some_and(Path::is_dir))
+    }
+
+    /// Discovers existing Cursor `state.vscdb` databases (`PLAN.md` §5, §10 T11).
+    pub fn discover_cursor_state_dbs(&self) -> io::Result<Vec<DiscoveredLog>> {
+        let mut seen = BTreeSet::new();
+        let mut logs = Vec::new();
+        for candidate in self.cursor_candidate_state_dbs() {
+            if candidate.is_file() {
+                let key = fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+                if seen.insert(key) {
+                    logs.push(DiscoveredLog {
+                        agent: AgentId::Cursor,
+                        path: candidate,
+                    });
+                }
+            }
+        }
+        logs.sort();
+        Ok(logs)
+    }
+
+    fn enclosing_repo_ancestors(&self) -> Vec<PathBuf> {
+        let Some(start) = &self.current_dir else {
+            return Vec::new();
+        };
+        let home_canon = self
+            .home_dir
+            .as_ref()
+            .map(|h| fs::canonicalize(h).unwrap_or_else(|_| h.clone()));
+
+        let mut ancestors = Vec::new();
+        let mut found_git = false;
+        let mut cur_opt = Some(start.as_path());
+        while let Some(cur) = cur_opt {
+            if cur.parent().is_none() {
+                break;
+            }
+            if let Some(ref hc) = home_canon {
+                let cur_canon = fs::canonicalize(cur).unwrap_or_else(|_| cur.to_path_buf());
+                if &cur_canon == hc {
+                    break;
+                }
+            }
+            ancestors.push(cur.to_path_buf());
+            if cur.join(".git").exists() {
+                found_git = true;
+                break;
+            }
+            cur_opt = cur.parent();
+        }
+        if !found_git {
+            ancestors.truncate(1);
+        }
+        ancestors
+    }
+}
+
+fn is_aider_history_filename(name: &str) -> bool {
+    name == ".aider.chat.history.md"
+        || name.ends_with(".aider.chat.history.md")
+        || name.ends_with(".chat.history.md")
+}
+
+fn is_aider_analytics_filename(name: &str) -> bool {
+    name == "analytics.jsonl"
+        || name == ".aider.analytics.jsonl"
+        || name.ends_with(".analytics.jsonl")
+}
+
+fn collect_bounded_files(
+    dir: &Path,
+    remaining_depth: usize,
+    predicate: fn(&str) -> bool,
+    out: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
+            if remaining_depth > 0 {
+                collect_bounded_files(&path, remaining_depth - 1, predicate, out)?;
+            }
+        } else if file_type.is_file() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if predicate(name) {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Opens an agent log file strictly read-only (`PLAN.md` §0 #5).

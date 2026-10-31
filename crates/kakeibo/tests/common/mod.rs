@@ -163,11 +163,28 @@ impl TestEnv {
         let expected: ExpectedGroundTruth =
             serde_json::from_str(&expected_raw).expect("valid expected.json");
 
+        if agent == "cursor" {
+            let vscdb_path = self
+                .home
+                .join("Library/Application Support/Cursor/User/globalStorage/state.vscdb");
+            if let Some(parent) = vscdb_path.parent() {
+                fs::create_dir_all(parent).expect("create Cursor globalStorage directory");
+            }
+            materialize_cursor_vscdb(&scenario_dir.join("cursor_kv.json"), &vscdb_path);
+            assert!(
+                vscdb_path.is_file(),
+                "expected staged Cursor state.vscdb missing: {}",
+                vscdb_path.display()
+            );
+            return (vec![vscdb_path], expected);
+        }
+
         let agent_home_subdir = match agent {
             "claude-code" => self.home.join(".claude"),
             "codex" => self.home.join(".codex"),
             "gemini-cli" => self.home.join(".gemini"),
             "opencode" => self.xdg_data.join("opencode"),
+            "aider" => self.home.join(".aider").join(scenario),
             other => panic!("unsupported fixture agent `{other}`"),
         };
 
@@ -211,8 +228,47 @@ impl TestEnv {
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("CODEX_HOME")
             .env_remove("GEMINI_CLI_HOME")
-            .env_remove("OPENCODE_DATA_DIR");
+            .env_remove("OPENCODE_DATA_DIR")
+            .env_remove("AIDER_HOME")
+            .env_remove("AIDER_CHAT_HISTORY_FILE")
+            .env_remove("AIDER_ANALYTICS_LOG")
+            .env_remove("CURSOR_STATE_DB")
+            .env_remove("CURSOR_GLOBAL_STORAGE_DIR")
+            .env_remove("APPDATA");
         cmd
+    }
+}
+
+fn materialize_cursor_vscdb(kv_json_path: &Path, vscdb_path: &Path) {
+    let raw = fs::read_to_string(kv_json_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", kv_json_path.display()));
+    let doc: serde_json::Value =
+        serde_json::from_str(&raw).expect("valid cursor_kv.json JSON payload");
+    let entries = doc
+        .get("cursorDiskKV")
+        .and_then(serde_json::Value::as_array)
+        .expect("cursor_kv.json must contain a cursorDiskKV array");
+
+    let conn = rusqlite::Connection::open(vscdb_path).expect("open staging state.vscdb");
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS cursorDiskKV (key TEXT PRIMARY KEY, value TEXT);",
+    )
+    .expect("create cursorDiskKV table");
+
+    for entry in entries {
+        let key = entry
+            .get("key")
+            .and_then(serde_json::Value::as_str)
+            .expect("cursorDiskKV entry must have string key");
+        let value_obj = entry
+            .get("value")
+            .expect("cursorDiskKV entry must have value");
+        let value_json = serde_json::to_string(value_obj).expect("serialize cursorDiskKV value");
+        conn.execute(
+            "INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, value_json],
+        )
+        .expect("insert cursorDiskKV row");
     }
 }
 

@@ -10,13 +10,13 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::aider::{parse_aider_analytics_file, parse_aider_history_file};
 use crate::catalog::open_readonly;
+use crate::cursor::extract_cursor_cwds_from_vscdb;
 use crate::gemini::resolve_gemini_raw_cwd;
 use crate::line_reader::{BoundedLineReader, LineReadOutcome, DEFAULT_MAX_LINE_BYTES};
-use crate::opencode::{
-    collect_json_files_recursive, open_sqlite_readonly, sqlite_err_to_io, table_columns,
-    table_exists,
-};
+use crate::opencode::collect_json_files_recursive;
+use crate::sqlite::{open_sqlite_readonly, sqlite_err_to_io, table_columns, table_exists};
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
@@ -326,4 +326,36 @@ pub fn extract_opencode_session_cwds(opencode_root: &Path) -> io::Result<BTreeMa
     }
 
     Ok(out)
+}
+
+/// Resolves `session_id -> raw_cwd` for an Aider `.aider.chat.history.md` or
+/// `--analytics-log` JSONL file strictly for opt-in `export --show-paths`.
+pub fn extract_aider_session_cwds(path: &Path) -> io::Result<BTreeMap<String, String>> {
+    let Some(parent_cwd) = path
+        .parent()
+        .and_then(Path::to_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+    else {
+        return Ok(BTreeMap::new());
+    };
+
+    let parsed = if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+        parse_aider_analytics_file(path)?
+    } else {
+        parse_aider_history_file(path)?
+    };
+
+    let mut out = BTreeMap::new();
+    for batch in parsed.sessions {
+        out.insert(batch.session_id, parent_cwd.clone());
+    }
+    Ok(out)
+}
+
+/// Reads `composerData:*` entries from a Cursor `state.vscdb` database strictly
+/// read-only to map `session_id -> raw_cwd` exclusively for opt-in `export --show-paths`.
+pub fn extract_cursor_session_cwds(db_path: &Path) -> io::Result<BTreeMap<String, String>> {
+    extract_cursor_cwds_from_vscdb(db_path)
 }

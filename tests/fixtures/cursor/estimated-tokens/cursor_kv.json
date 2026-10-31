@@ -1,0 +1,95 @@
+{
+  "cursorDiskKV": [
+    {
+      "key": "workbench.panel.composer",
+      "value": {
+        "pinned": true
+      }
+    },
+    {
+      "key": "composerData:e8bbc79d-1db6-4661-b8ab-374b6b491a6a",
+      "value": {
+        "_v": 3,
+        "composerId": "e8bbc79d-1db6-4661-b8ab-374b6b491a6a",
+        "createdAt": 1793455200000,
+        "fullConversationHeadersOnly": [
+          {
+            "bubbleId": "91764bdb-110d-44d0-aa77-e4aee0751fe6",
+            "type": 1
+          },
+          {
+            "bubbleId": "64650c54-b2b2-4c2a-873e-637fde4ea3c4",
+            "type": 2
+          },
+          {
+            "bubbleId": "39bc0bf2-405c-4546-a60f-3b528369a991",
+            "type": 2
+          }
+        ],
+        "lastUpdatedAt": 1793455260000,
+        "modelConfig": {
+          "modelName": "claude-sonnet-4-5"
+        },
+        "name": "Synthetic estimated-token composer",
+        "workspaceUri": "file:///synthetic/workspace/cursor-est"
+      }
+    },
+    {
+      "key": "bubbleId:e8bbc79d-1db6-4661-b8ab-374b6b491a6a:39bc0bf2-405c-4546-a60f-3b528369a991",
+      "value": {
+        "_v": 3,
+        "bubbleId": "39bc0bf2-405c-4546-a60f-3b528369a991",
+        "createdAt": 1793455228000,
+        "modelInfo": {
+          "modelName": "claude-sonnet-4-5"
+        },
+        "text": "stream delta catalog checkpoint delta alpha journal meadow index vector factor counter sector pebble symbol diary tablet delta timber c.",
+        "tokenCount": {
+          "inputTokens": 12370,
+          "outputTokens": 310
+        },
+        "type": 2
+      }
+    },
+    {
+      "key": "bubbleId:e8bbc79d-1db6-4661-b8ab-374b6b491a6a:91764bdb-110d-44d0-aa77-e4aee0751fe6",
+      "value": {
+        "_v": 3,
+        "bubbleId": "91764bdb-110d-44d0-aa77-e4aee0751fe6",
+        "createdAt": 1793455201000,
+        "text": "diary offset needle vector kernel parser orbit engine target horizon engine vessel token router orbit t.",
+        "type": 1
+      }
+    },
+    {
+      "key": "bubbleId:e8bbc79d-1db6-4661-b8ab-374b6b491a6a:64650c54-b2b2-4c2a-873e-637fde4ea3c4",
+      "value": {
+        "_v": 3,
+        "bubbleId": "64650c54-b2b2-4c2a-873e-637fde4ea3c4",
+        "createdAt": 1793455212000,
+        "modelInfo": {
+          "modelName": "claude-sonnet-4-5"
+        },
+        "text": "target symbol pebble target tensor stream alpha anchor thread stream sample token prefix pebble.",
+        "thinking": {
+          "text": "header filter marker tracer filter epoch checkpoint Attribution metric symbol g."
+        },
+        "tokenCount": {
+          "inputTokens": 11420,
+          "outputTokens": 260
+        },
+        "toolFormerData": {
+          "name": "read_file",
+          "params": {
+            "relativeWorkspacePath": "src/parser.rs"
+          },
+          "rawArgs": "{\"relativeWorkspacePath\":\"src/parser.rs\"}",
+          "result": "catalog tracer block entry thread zenith context tracer prism zenith packet offset pattern lantern target sample circuit Attribution stream journal zenith context cipher socket schema quartz meadow counter balance sketch ledger circuit target garden orbit thread vector prism cipher graph packet sketch entry header syntax canvas router sample worker thread metric source needle context prompt Attribution socket manifest block factor cache module checkpoint matrix timber entry budget ripple source manifest tracer module anchor sketch graph cipher cursor digest factor prism pebble alpha delta stride vessel cursor alpha delta zenith sum.",
+          "status": "completed",
+          "toolCallId": "call_c51dd71e473a6630"
+        },
+        "type": 2
+      }
+    }
+  ]
+}

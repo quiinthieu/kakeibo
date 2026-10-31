@@ -11,10 +11,12 @@ use kakeibo_core::pricing::PricingCatalog;
 use kakeibo_core::{AgentId, Confidence, Timestamp, TurnRecord};
 use kakeibo_parse::hash::hash_cwd;
 use kakeibo_parse::{
-    extract_claude_session_cwds, extract_codex_session_cwds, extract_gemini_session_cwds,
-    extract_opencode_session_cwds, parse_claude_file, parse_claude_file_with_options,
-    parse_codex_file, parse_gemini_file_with_options, parse_opencode_root, ClaudeParseOptions,
-    GeminiParseOptions, PathCatalog,
+    extract_aider_session_cwds, extract_claude_session_cwds, extract_codex_session_cwds,
+    extract_cursor_session_cwds, extract_gemini_session_cwds, extract_opencode_session_cwds,
+    parse_aider_analytics_file, parse_aider_history_file, parse_claude_file,
+    parse_claude_file_with_options, parse_codex_file, parse_cursor_vscdb,
+    parse_gemini_file_with_options, parse_opencode_root, ClaudeParseOptions, GeminiParseOptions,
+    PathCatalog,
 };
 use kakeibo_report::{
     sort_session_reports, DoctorReport, DoctorSourceSummary, ObservedModelPriceStatus,
@@ -69,7 +71,7 @@ fn compute_corpus_median_p1(
         .filter_map(|turns| {
             turns
                 .iter()
-                .find(|tr| !tr.hints.sidechain)
+                .find(|tr| !tr.hints.sidechain && tr.usage.confidence != Confidence::NotRecorded)
                 .map(|tr| tr.usage.prompt_tokens())
         })
         .collect();
@@ -245,6 +247,64 @@ fn discover_raw_sessions(
             if capture_raw_paths {
                 for (sid, cwd) in extract_opencode_session_cwds(&root)? {
                     raw_cwds.insert((AgentId::Opencode, sid), cwd);
+                }
+            }
+        }
+    }
+
+    if agent_filter.is_none_or(|a| a == AgentId::Aider) {
+        for log in catalog.discover_aider_histories()? {
+            let parsed = parse_aider_history_file(&log.path)?;
+            for batch in parsed.sessions {
+                if batch.records.is_empty() {
+                    continue;
+                }
+                primary_turns
+                    .entry((AgentId::Aider, batch.session_id))
+                    .or_default()
+                    .extend(batch.records);
+            }
+            if capture_raw_paths {
+                for (sid, cwd) in extract_aider_session_cwds(&log.path)? {
+                    raw_cwds.insert((AgentId::Aider, sid), cwd);
+                }
+            }
+        }
+
+        for log in catalog.discover_aider_analytics_logs()? {
+            let parsed = parse_aider_analytics_file(&log.path)?;
+            for batch in parsed.sessions {
+                if batch.records.is_empty() {
+                    continue;
+                }
+                primary_turns
+                    .entry((AgentId::Aider, batch.session_id))
+                    .or_default()
+                    .extend(batch.records);
+            }
+            if capture_raw_paths {
+                for (sid, cwd) in extract_aider_session_cwds(&log.path)? {
+                    raw_cwds.insert((AgentId::Aider, sid), cwd);
+                }
+            }
+        }
+    }
+
+    if agent_filter.is_none_or(|a| a == AgentId::Cursor) {
+        for log in catalog.discover_cursor_state_dbs()? {
+            let parsed = parse_cursor_vscdb(&log.path)?;
+            for batch in parsed.sessions {
+                if batch.records.is_empty() {
+                    continue;
+                }
+                primary_turns
+                    .entry((AgentId::Cursor, batch.session_id))
+                    .or_default()
+                    .extend(batch.records);
+            }
+            if capture_raw_paths {
+                for (sid, cwd) in extract_cursor_session_cwds(&log.path)? {
+                    raw_cwds.insert((AgentId::Cursor, sid), cwd);
                 }
             }
         }
@@ -508,7 +568,7 @@ fn count_json_files_recursive(dir: &Path) -> io::Result<usize> {
 
 /// Runs read-only discovery and diagnostic inspection for `kakeibo doctor` (`PLAN.md` §6.4).
 pub fn run_doctor(catalog: &PathCatalog) -> io::Result<DoctorReport> {
-    let mut sources = Vec::with_capacity(4);
+    let mut sources = Vec::with_capacity(6);
 
     // 1. Claude Code
     let claude_root_exists = catalog.claude_root().is_some_and(|p| p.is_dir());
@@ -708,6 +768,102 @@ pub fn run_doctor(catalog: &PathCatalog) -> io::Result<DoctorReport> {
         ignored_records: opencode_ignored,
         unknown_record_types: opencode_unknown,
         parse_issues: opencode_issues,
+    });
+
+    // 5. Aider
+    let aider_histories = catalog.discover_aider_histories()?;
+    let aider_analytics = catalog.discover_aider_analytics_logs()?;
+    let aider_root_exists = catalog.aider_root().is_some_and(|p| p.is_dir())
+        || !aider_histories.is_empty()
+        || !aider_analytics.is_empty();
+    let mut aider_sessions = BTreeSet::new();
+    let mut aider_turns = 0_usize;
+    let mut aider_versions = BTreeSet::new();
+    let mut aider_ignored = 0_u64;
+    let mut aider_unknown: BTreeMap<String, u64> = BTreeMap::new();
+    let mut aider_issues = 0_usize;
+
+    for log in &aider_histories {
+        let parsed = parse_aider_history_file(&log.path)?;
+        for batch in &parsed.sessions {
+            aider_turns += batch.records.len();
+            if !batch.records.is_empty() {
+                aider_sessions.insert(batch.session_id.clone());
+            }
+        }
+        aider_versions.extend(parsed.diagnostics.cli_versions);
+        aider_ignored = aider_ignored.saturating_add(parsed.diagnostics.ignored_records);
+        aider_issues += parsed.diagnostics.issues.len();
+        for (k, v) in parsed.diagnostics.unknown_record_types {
+            *aider_unknown.entry(k).or_insert(0) += v;
+        }
+    }
+    for log in &aider_analytics {
+        let parsed = parse_aider_analytics_file(&log.path)?;
+        for batch in &parsed.sessions {
+            aider_turns += batch.records.len();
+            if !batch.records.is_empty() {
+                aider_sessions.insert(batch.session_id.clone());
+            }
+        }
+        aider_versions.extend(parsed.diagnostics.cli_versions);
+        aider_ignored = aider_ignored.saturating_add(parsed.diagnostics.ignored_records);
+        aider_issues += parsed.diagnostics.issues.len();
+        for (k, v) in parsed.diagnostics.unknown_record_types {
+            *aider_unknown.entry(k).or_insert(0) += v;
+        }
+    }
+
+    sources.push(DoctorSourceSummary {
+        agent: AgentId::Aider,
+        root_exists: aider_root_exists,
+        log_files: aider_histories.len() + aider_analytics.len(),
+        subagent_files: 0,
+        sessions: aider_sessions.len(),
+        turns: aider_turns,
+        cli_versions: aider_versions.into_iter().collect(),
+        ignored_records: aider_ignored,
+        unknown_record_types: aider_unknown,
+        parse_issues: aider_issues,
+    });
+
+    // 6. Cursor
+    let cursor_root_exists = catalog.cursor_root_exists();
+    let cursor_dbs = catalog.discover_cursor_state_dbs()?;
+    let mut cursor_sessions = BTreeSet::new();
+    let mut cursor_turns = 0_usize;
+    let mut cursor_versions = BTreeSet::new();
+    let mut cursor_ignored = 0_u64;
+    let mut cursor_unknown: BTreeMap<String, u64> = BTreeMap::new();
+    let mut cursor_issues = 0_usize;
+
+    for db in &cursor_dbs {
+        let parsed = parse_cursor_vscdb(&db.path)?;
+        for batch in &parsed.sessions {
+            cursor_turns += batch.records.len();
+            if !batch.records.is_empty() {
+                cursor_sessions.insert(batch.session_id.clone());
+            }
+        }
+        cursor_versions.extend(parsed.diagnostics.cli_versions);
+        cursor_ignored = cursor_ignored.saturating_add(parsed.diagnostics.ignored_records);
+        cursor_issues += parsed.diagnostics.issues.len();
+        for (k, v) in parsed.diagnostics.unknown_record_types {
+            *cursor_unknown.entry(k).or_insert(0) += v;
+        }
+    }
+
+    sources.push(DoctorSourceSummary {
+        agent: AgentId::Cursor,
+        root_exists: cursor_root_exists,
+        log_files: cursor_dbs.len(),
+        subagent_files: 0,
+        sessions: cursor_sessions.len(),
+        turns: cursor_turns,
+        cli_versions: cursor_versions.into_iter().collect(),
+        ignored_records: cursor_ignored,
+        unknown_record_types: cursor_unknown,
+        parse_issues: cursor_issues,
     });
 
     Ok(DoctorReport { sources })

@@ -195,6 +195,17 @@ impl SessionReport {
                 .saturating_add(blk.carried_prompt_tokens());
         }
 
+        let all_not_recorded = !turns.is_empty()
+            && turns
+                .iter()
+                .all(|t| t.usage.confidence == Confidence::NotRecorded)
+            && subagents.is_empty();
+        let tool_confidence = if all_not_recorded {
+            Confidence::NotRecorded
+        } else {
+            Confidence::Estimated
+        };
+
         let mut tools: Vec<ToolSpendSummary> = tool_map
             .into_iter()
             .map(|(tool, acc)| {
@@ -208,7 +219,7 @@ impl SessionReport {
                     initial_tokens: acc.initial_tokens,
                     carried_tokens: acc.carried_tokens,
                     lifetime_tokens,
-                    confidence: Confidence::Estimated,
+                    confidence: tool_confidence,
                     estimation_method: attribution.estimation_method,
                 }
             })
@@ -279,6 +290,18 @@ impl SessionReport {
     #[must_use]
     pub const fn totals(&self) -> TokenSplit {
         self.attribution.totals
+    }
+
+    /// Returns `true` when every turn in this session lacks local token counts
+    /// (`Confidence::NotRecorded`) and no subagent turns are attached.
+    #[must_use]
+    pub fn all_turns_not_recorded(&self) -> bool {
+        !self.turns.is_empty()
+            && self
+                .turns
+                .iter()
+                .all(|t| t.usage.confidence == Confidence::NotRecorded)
+            && self.attribution.subagents.is_empty()
     }
 }
 

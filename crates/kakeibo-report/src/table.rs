@@ -86,9 +86,19 @@ fn format_hints(hints: &TurnHints) -> String {
     }
 }
 
+const NOT_RECORDED: &str = "not recorded";
+
+const fn confidence_display(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::NotRecorded => NOT_RECORDED,
+        other => other.as_str(),
+    }
+}
+
 fn provenance_str(confidence: Confidence, method: Option<&str>) -> String {
     match (confidence, method) {
         (Confidence::Estimated, Some(m)) => format!("estimated: {m}"),
+        (Confidence::NotRecorded, _) => NOT_RECORDED.to_string(),
         (other, _) => other.as_str().to_string(),
     }
 }
@@ -121,19 +131,37 @@ pub fn render_sessions_table(sessions: &[SessionReport]) -> String {
                 .flags
                 .first()
                 .map_or_else(|| "none".to_string(), |f| f.id.to_string());
+            let (prompt_cell, split_cell, out_cell) = if s.all_turns_not_recorded() {
+                (
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                )
+            } else {
+                let prompt = if s.attribution.totals_confidence == Confidence::Estimated {
+                    format!("{} (estimated)", format_tokens(tot.prompt_tokens()))
+                } else {
+                    format_tokens(tot.prompt_tokens())
+                };
+                (
+                    prompt,
+                    format!(
+                        "{}/{}/{}",
+                        format_tokens(tot.fresh_in),
+                        format_tokens(tot.cache_write),
+                        format_tokens(tot.cache_read),
+                    ),
+                    format_tokens(tot.output),
+                )
+            };
             vec![
                 s.short_id().to_string(),
                 s.agent.to_string(),
                 s.ended_at.to_string(),
                 s.turn_count().to_string(),
-                format_tokens(tot.prompt_tokens()),
-                format!(
-                    "{}/{}/{}",
-                    format_tokens(tot.fresh_in),
-                    format_tokens(tot.cache_write),
-                    format_tokens(tot.cache_read),
-                ),
-                format_tokens(tot.output),
+                prompt_cell,
+                split_cell,
+                out_cell,
                 s.cost.display_label(),
                 top_flag,
             ]
@@ -171,25 +199,31 @@ pub fn render_autopsy_report(
         report.ended_at,
         report.turn_count()
     );
+    let unrecorded = report.all_turns_not_recorded();
     let _ = writeln!(out, "Models:         {models_str}");
     let _ = writeln!(out, "Project:        {}", report.project_label(false));
-    let _ = writeln!(
-        out,
-        "Totals:         {} prompt ({} fresh / {} write / {} read) + {} output = {} tokens ({})",
-        format_tokens(tot.prompt_tokens()),
-        format_tokens(tot.fresh_in),
-        format_tokens(tot.cache_write),
-        format_tokens(tot.cache_read),
-        format_tokens(tot.output),
-        format_tokens(total_tokens),
-        report.attribution.totals_confidence,
-    );
-    let _ = writeln!(
-        out,
-        "Fixed overhead: {} tokens (estimated: {})",
-        format_tokens(report.attribution.fixed_overhead_tokens),
-        report.attribution.estimation_method,
-    );
+    if unrecorded {
+        let _ = writeln!(out, "Totals:         {NOT_RECORDED}");
+        let _ = writeln!(out, "Fixed overhead: {NOT_RECORDED}");
+    } else {
+        let _ = writeln!(
+            out,
+            "Totals:         {} prompt ({} fresh / {} write / {} read) + {} output = {} tokens ({})",
+            format_tokens(tot.prompt_tokens()),
+            format_tokens(tot.fresh_in),
+            format_tokens(tot.cache_write),
+            format_tokens(tot.cache_read),
+            format_tokens(tot.output),
+            format_tokens(total_tokens),
+            confidence_display(report.attribution.totals_confidence),
+        );
+        let _ = writeln!(
+            out,
+            "Fixed overhead: {} tokens (estimated: {})",
+            format_tokens(report.attribution.fixed_overhead_tokens),
+            report.attribution.estimation_method,
+        );
+    }
     let _ = writeln!(out, "Cost:           {}", report.cost.display_label());
 
     let cat_prov = provenance_str(
@@ -235,18 +269,30 @@ pub fn render_autopsy_report(
         let cat_rows: Vec<Vec<String>> = categories_to_show
             .into_iter()
             .map(|cat| {
-                let split = report.attribution.categories.get(cat);
-                let cat_tot = split.total_tokens();
-                let bps = share_basis_points(cat_tot, total_tokens);
-                vec![
-                    cat.to_string(),
-                    format_tokens(cat_tot),
-                    format_share_pct(bps),
-                    format_tokens(split.fresh_in),
-                    format_tokens(split.cache_write),
-                    format_tokens(split.cache_read),
-                    format_tokens(split.output),
-                ]
+                if unrecorded {
+                    vec![
+                        cat.to_string(),
+                        NOT_RECORDED.to_string(),
+                        "-".to_string(),
+                        NOT_RECORDED.to_string(),
+                        NOT_RECORDED.to_string(),
+                        NOT_RECORDED.to_string(),
+                        NOT_RECORDED.to_string(),
+                    ]
+                } else {
+                    let split = report.attribution.categories.get(cat);
+                    let cat_tot = split.total_tokens();
+                    let bps = share_basis_points(cat_tot, total_tokens);
+                    vec![
+                        cat.to_string(),
+                        format_tokens(cat_tot),
+                        format_share_pct(bps),
+                        format_tokens(split.fresh_in),
+                        format_tokens(split.cache_write),
+                        format_tokens(split.cache_read),
+                        format_tokens(split.output),
+                    ]
+                }
             })
             .collect();
         out.push_str(&format_aligned_table(&cat_headers, &cat_align, &cat_rows));
@@ -258,11 +304,15 @@ pub fn render_autopsy_report(
     let show_tools = !report.tools.is_empty()
         && category_filter.is_none_or(|c| matches!(c, Category::ToolOutput | Category::Retries));
     if show_tools {
-        let _ = writeln!(
-            out,
-            "\nTools (estimated: {}):",
-            report.attribution.estimation_method
-        );
+        if unrecorded {
+            let _ = writeln!(out, "\nTools ({NOT_RECORDED}):");
+        } else {
+            let _ = writeln!(
+                out,
+                "\nTools (estimated: {}):",
+                report.attribution.estimation_method
+            );
+        }
         let tool_headers = [
             "TOOL", "CALLS", "RESULTS", "ERRORS", "BYTES", "INITIAL", "CARRIED", "LIFETIME",
         ];
@@ -271,15 +321,29 @@ pub fn render_autopsy_report(
             .tools
             .iter()
             .map(|t| {
+                let (init_cell, carried_cell, life_cell) =
+                    if unrecorded || t.confidence == Confidence::NotRecorded {
+                        (
+                            NOT_RECORDED.to_string(),
+                            NOT_RECORDED.to_string(),
+                            NOT_RECORDED.to_string(),
+                        )
+                    } else {
+                        (
+                            format_tokens(t.initial_tokens),
+                            format_tokens(t.carried_tokens),
+                            format_tokens(t.lifetime_tokens),
+                        )
+                    };
                 vec![
                     t.tool.clone(),
                     t.calls.to_string(),
                     t.results.to_string(),
                     t.errors.to_string(),
                     format_tokens(t.bytes),
-                    format_tokens(t.initial_tokens),
-                    format_tokens(t.carried_tokens),
-                    format_tokens(t.lifetime_tokens),
+                    init_cell,
+                    carried_cell,
+                    life_cell,
                 ]
             })
             .collect();
@@ -314,7 +378,12 @@ pub fn render_autopsy_report(
     }
 
     if show_turns {
-        out.push_str("\nTurns (measured):\n");
+        let turns_conf = if unrecorded {
+            NOT_RECORDED
+        } else {
+            confidence_display(report.attribution.totals_confidence)
+        };
+        let _ = writeln!(out, "\nTurns ({turns_conf}):");
         if report.has_any_priced_turn() {
             let turn_headers = [
                 "TURN",
@@ -341,6 +410,24 @@ pub fn render_autopsy_report(
                         Some(cat) => ta.categories.get(cat),
                         None => ta.measured,
                     };
+                    let (p_cell, f_cell, w_cell, r_cell, o_cell) =
+                        if ta.measured_confidence == Confidence::NotRecorded {
+                            (
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                            )
+                        } else {
+                            (
+                                format_tokens(display_split.prompt_tokens()),
+                                format_tokens(display_split.fresh_in),
+                                format_tokens(display_split.cache_write),
+                                format_tokens(display_split.cache_read),
+                                format_tokens(display_split.output),
+                            )
+                        };
                     let cost_cell = match report
                         .cost_attribution
                         .turn_costs
@@ -360,11 +447,11 @@ pub fn render_autopsy_report(
                         tr.turn.to_string(),
                         tr.ts.to_string(),
                         tr.model.as_deref().unwrap_or("unknown").to_string(),
-                        format_tokens(display_split.prompt_tokens()),
-                        format_tokens(display_split.fresh_in),
-                        format_tokens(display_split.cache_write),
-                        format_tokens(display_split.cache_read),
-                        format_tokens(display_split.output),
+                        p_cell,
+                        f_cell,
+                        w_cell,
+                        r_cell,
+                        o_cell,
                         cost_cell,
                         format_hints(&tr.hints),
                     ]
@@ -397,15 +484,33 @@ pub fn render_autopsy_report(
                         Some(cat) => ta.categories.get(cat),
                         None => ta.measured,
                     };
+                    let (p_cell, f_cell, w_cell, r_cell, o_cell) =
+                        if ta.measured_confidence == Confidence::NotRecorded {
+                            (
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                                NOT_RECORDED.to_string(),
+                            )
+                        } else {
+                            (
+                                format_tokens(display_split.prompt_tokens()),
+                                format_tokens(display_split.fresh_in),
+                                format_tokens(display_split.cache_write),
+                                format_tokens(display_split.cache_read),
+                                format_tokens(display_split.output),
+                            )
+                        };
                     vec![
                         tr.turn.to_string(),
                         tr.ts.to_string(),
                         tr.model.as_deref().unwrap_or("unknown").to_string(),
-                        format_tokens(display_split.prompt_tokens()),
-                        format_tokens(display_split.fresh_in),
-                        format_tokens(display_split.cache_write),
-                        format_tokens(display_split.cache_read),
-                        format_tokens(display_split.output),
+                        p_cell,
+                        f_cell,
+                        w_cell,
+                        r_cell,
+                        o_cell,
                         format_hints(&tr.hints),
                     ]
                 })
@@ -480,6 +585,7 @@ pub fn render_top_table(sessions: &[SessionReport], by: TopDimension) -> String 
 }
 
 fn render_top_by_category(sessions: &[SessionReport]) -> String {
+    let all_unrecorded = sessions.iter().all(SessionReport::all_turns_not_recorded);
     let mut totals = CategoryBreakdown::new();
     let mut session_counts = [0_usize; Category::ALL.len()];
     let mut grand_total = 0_u64;
@@ -522,19 +628,33 @@ fn render_top_by_category(sessions: &[SessionReport]) -> String {
     let rows: Vec<Vec<String>> = items
         .into_iter()
         .map(|(cat, count, split)| {
-            let cat_tot = split.total_tokens();
-            let bps = share_basis_points(cat_tot, grand_total);
-            vec![
-                cat.to_string(),
-                count.to_string(),
-                format_tokens(cat_tot),
-                format_share_pct(bps),
-                format_tokens(split.fresh_in),
-                format_tokens(split.cache_write),
-                format_tokens(split.cache_read),
-                format_tokens(split.output),
-                prov.clone(),
-            ]
+            if all_unrecorded {
+                vec![
+                    cat.to_string(),
+                    count.to_string(),
+                    NOT_RECORDED.to_string(),
+                    "-".to_string(),
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                ]
+            } else {
+                let cat_tot = split.total_tokens();
+                let bps = share_basis_points(cat_tot, grand_total);
+                vec![
+                    cat.to_string(),
+                    count.to_string(),
+                    format_tokens(cat_tot),
+                    format_share_pct(bps),
+                    format_tokens(split.fresh_in),
+                    format_tokens(split.cache_write),
+                    format_tokens(split.cache_read),
+                    format_tokens(split.output),
+                    prov.clone(),
+                ]
+            }
         })
         .collect();
 
@@ -544,6 +664,7 @@ fn render_top_by_category(sessions: &[SessionReport]) -> String {
 #[derive(Default)]
 struct CrossToolAgg {
     sessions: BTreeSet<String>,
+    recorded_sessions: usize,
     calls: u32,
     results: u32,
     bytes: u64,
@@ -556,9 +677,12 @@ fn render_top_by_tool(sessions: &[SessionReport]) -> String {
     let method = sessions[0].attribution.estimation_method;
 
     for s in sessions {
+        let is_recorded = !s.all_turns_not_recorded();
         for t in &s.tools {
             let agg = map.entry(t.tool.clone()).or_default();
-            agg.sessions.insert(format!("{}:{}", s.agent, s.session_id));
+            if agg.sessions.insert(format!("{}:{}", s.agent, s.session_id)) && is_recorded {
+                agg.recorded_sessions += 1;
+            }
             agg.calls = agg.calls.saturating_add(t.calls);
             agg.results = agg.results.saturating_add(t.results);
             agg.bytes = agg.bytes.saturating_add(t.bytes);
@@ -593,15 +717,28 @@ fn render_top_by_tool(sessions: &[SessionReport]) -> String {
     let rows: Vec<Vec<String>> = list
         .into_iter()
         .map(|(tool, agg)| {
+            let (carried_cell, life_cell, prov_cell) = if agg.recorded_sessions == 0 {
+                (
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                )
+            } else {
+                (
+                    format_tokens(agg.carried_tokens),
+                    format_tokens(agg.lifetime_tokens),
+                    prov.clone(),
+                )
+            };
             vec![
                 tool,
                 agg.sessions.len().to_string(),
                 agg.calls.to_string(),
                 agg.results.to_string(),
                 format_tokens(agg.bytes),
-                format_tokens(agg.carried_tokens),
-                format_tokens(agg.lifetime_tokens),
-                prov.clone(),
+                carried_cell,
+                life_cell,
+                prov_cell,
             ]
         })
         .collect();
@@ -612,6 +749,7 @@ fn render_top_by_tool(sessions: &[SessionReport]) -> String {
 #[derive(Default)]
 struct CrossProjectAgg {
     sessions: usize,
+    recorded_sessions: usize,
     turns: u32,
     totals: TokenSplit,
     flags: usize,
@@ -663,6 +801,9 @@ fn render_top_by_project(sessions: &[SessionReport]) -> String {
         let key = s.project_label(false);
         let agg = map.entry(key).or_default();
         agg.sessions += 1;
+        if !s.all_turns_not_recorded() {
+            agg.recorded_sessions += 1;
+        }
         agg.turns = agg.turns.saturating_add(s.turn_count());
         agg.totals.add_assign(s.totals());
         agg.flags += s.flags.len();
@@ -706,13 +847,26 @@ fn render_top_by_project(sessions: &[SessionReport]) -> String {
         .into_iter()
         .map(|(proj, agg)| {
             let cost_label = agg.cost_label();
+            let (prompt_cell, out_cell, tot_cell) = if agg.recorded_sessions == 0 {
+                (
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                    NOT_RECORDED.to_string(),
+                )
+            } else {
+                (
+                    format_tokens(agg.totals.prompt_tokens()),
+                    format_tokens(agg.totals.output),
+                    format_tokens(agg.totals.total_tokens()),
+                )
+            };
             vec![
                 proj,
                 agg.sessions.to_string(),
                 agg.turns.to_string(),
-                format_tokens(agg.totals.prompt_tokens()),
-                format_tokens(agg.totals.output),
-                format_tokens(agg.totals.total_tokens()),
+                prompt_cell,
+                out_cell,
+                tot_cell,
                 agg.flags.to_string(),
                 cost_label,
             ]

@@ -3483,6 +3483,710 @@ def gen_opencode_subagent_cost(rng: SplitMix64, seed: int) -> dict[str, bytes]:
     }
 
 
+def aider_history_session_id(
+    started_ts: str,
+    ordinal: int,
+    model: str,
+    fresh_in: int,
+    cache_write: int,
+    cache_read: int,
+    output: int,
+) -> str:
+    payload = (
+        f"aider-history\0{started_ts}\0{ordinal}\0"
+        f"{model}:{fresh_in}:{cache_write}:{cache_read}:{output}"
+    ).encode("utf-8")
+    return f"aider_hist_{hashlib.sha256(payload).hexdigest()[:16]}"
+
+
+def aider_analytics_session_id(
+    started_ts: str,
+    ordinal: int,
+    user_id: str,
+    model: str,
+    prompt_tokens: int,
+    output: int,
+) -> str:
+    payload = (
+        f"aider-analytics\0{started_ts}\0{ordinal}\0{user_id}\0"
+        f"{model}:{prompt_tokens}:{output}"
+    ).encode("utf-8")
+    return f"aider_ana_{hashlib.sha256(payload).hexdigest()[:16]}"
+
+
+def gen_aider_chat_history(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    log_rel = ".aider.chat.history.md"
+    version = "0.82.2"
+    s1_model = "claude-sonnet-4-5"
+    s1_ts = "2026-10-31T11:00:00Z"
+
+    u1_text = rng.synth_text(88)
+    a1_text = rng.synth_text(120)
+    u2_text = rng.synth_text(72)
+    a2_text = rng.synth_text(104)
+    u3_text = rng.synth_text(64)
+    a3_text = rng.synth_text(96)
+
+    # Session 1 Turn 1: `> Tokens: 12k sent, 9.5k cache write, 1.4k received. Cost: $0.057 message, $0.057 session.`
+    t1_prompt = 12000
+    t1_cw = 9500
+    t1_cr = 0
+    t1_fresh = t1_prompt - t1_cw - t1_cr
+    t1_out = 1400
+
+    # Session 1 Turn 2: `> Tokens: 14k sent, 1.5k cache write, 9.5k cache hit, 620 received. Cost: $0.028 message, $0.085 session.`
+    t2_prompt = 14000
+    t2_cw = 1500
+    t2_cr = 9500
+    t2_fresh = t2_prompt - t2_cw - t2_cr
+    t2_out = 620
+
+    # Session 1 Turn 3 (after `/clear` compaction, exact sub-1k counts, $0.00 cost):
+    t3_prompt = 850 + rng.rand_range(0, 40)
+    t3_cw = 0
+    t3_cr = 0
+    t3_fresh = t3_prompt
+    t3_out = 120
+
+    s1_id = aider_history_session_id(
+        s1_ts, 1, s1_model, t1_fresh, t1_cw, t1_cr, t1_out
+    )
+
+    t3_hints = default_hints()
+    t3_hints["compaction"] = True
+
+    s1_turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": s1_model,
+            "prompt_tokens": t1_prompt,
+            "rate_limit_used_percent": None,
+            "ts": s1_ts,
+            "turn": 1,
+            "usage": {
+                "cache_read": t1_cr,
+                "cache_write": t1_cw,
+                "confidence": "estimated",
+                "fresh_in": t1_fresh,
+                "output": t1_out,
+                "reasoning": None,
+            },
+        },
+        {
+            "added_blocks": [
+                {"bytes": len(u2_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": s1_model,
+            "prompt_tokens": t2_prompt,
+            "rate_limit_used_percent": None,
+            "ts": s1_ts,
+            "turn": 2,
+            "usage": {
+                "cache_read": t2_cr,
+                "cache_write": t2_cw,
+                "confidence": "estimated",
+                "fresh_in": t2_fresh,
+                "output": t2_out,
+                "reasoning": None,
+            },
+        },
+        {
+            "added_blocks": [
+                {"bytes": len(u3_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a3_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": t3_hints,
+            "model": s1_model,
+            "prompt_tokens": t3_prompt,
+            "rate_limit_used_percent": None,
+            "ts": s1_ts,
+            "turn": 3,
+            "usage": {
+                "cache_read": t3_cr,
+                "cache_write": t3_cw,
+                "confidence": "estimated",
+                "fresh_in": t3_fresh,
+                "output": t3_out,
+                "reasoning": None,
+            },
+        },
+    ]
+
+    # Session 2 in the same `.aider.chat.history.md` file:
+    s2_model = "gpt-4o"
+    s2_ts = "2026-10-31T11:30:00Z"
+    s2_u1_text = rng.synth_text(80)
+    s2_a1_text = rng.synth_text(112)
+    s2_prompt = 4200
+    s2_out = 310
+    s2_id = aider_history_session_id(s2_ts, 2, s2_model, s2_prompt, 0, 0, s2_out)
+
+    s2_turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(s2_u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(s2_a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": s2_model,
+            "prompt_tokens": s2_prompt,
+            "rate_limit_used_percent": None,
+            "ts": s2_ts,
+            "turn": 1,
+            "usage": {
+                "cache_read": 0,
+                "cache_write": 0,
+                "confidence": "estimated",
+                "fresh_in": s2_prompt,
+                "output": s2_out,
+                "reasoning": None,
+            },
+        }
+    ]
+
+    md_lines = [
+        "# aider chat started at 2026-10-31 11:00:00",
+        "",
+        f"> Aider v{version}",
+        f"> Main model: {s1_model} with diff edit format",
+        f"> Models: {s1_model}, weak model claude-haiku-4-5",
+        "",
+        f"#### {u1_text}",
+        "",
+        a1_text,
+        "",
+        "> Tokens: 12k sent, 9.5k cache write, 1.4k received. Cost: $0.057 message, $0.057 session.",
+        "",
+        f"#### {u2_text}",
+        "",
+        a2_text,
+        "",
+        "> Tokens: 14k sent, 1.5k cache write, 9.5k cache hit, 620 received. Cost: $0.028 message, $0.085 session.",
+        "",
+        "#### /clear",
+        "",
+        "> Cleared chat history.",
+        "",
+        f"#### {u3_text}",
+        "",
+        a3_text,
+        "",
+        f"> Tokens: {t3_prompt} sent, {t3_out} received. Cost: $0.00 message, $0.085 session.",
+        "",
+        "# aider chat started at 2026-10-31 11:30:00",
+        "",
+        f"> Aider v{version}",
+        f"> Main model: {s2_model} with whole edit format",
+        "",
+        f"#### {s2_u1_text}",
+        "",
+        s2_a1_text,
+        "",
+        "> Tokens: 4.2k sent, 310 received. Cost: $0.014 message, $0.014 session.",
+        "",
+    ]
+    md_bytes = "\n".join(md_lines).encode("utf-8")
+
+    expected = {
+        "agent": "aider",
+        "log_files": [log_rel],
+        "scenario": "chat-history",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": s1_model,
+                "session_id": s1_id,
+                "totals": compute_session_totals(s1_turns_gt),
+                "turns": s1_turns_gt,
+            },
+            {
+                "ignored_records": 0,
+                "model": s2_model,
+                "session_id": s2_id,
+                "totals": compute_session_totals(s2_turns_gt),
+                "turns": s2_turns_gt,
+            },
+        ],
+    }
+
+    base = "aider/chat-history"
+    return {
+        f"{base}/{log_rel}": md_bytes,
+        f"{base}/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_aider_analytics_log(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    log_rel = "analytics.jsonl"
+    version = "0.82.2"
+    model = "claude-sonnet-4-5"
+    anon_user_id = rng.uuid_str()
+
+    # 2026-10-31T12:00:00Z == 1793448000 Unix epoch seconds
+    base_epoch = 1793448000
+    started_ts = "2026-10-31T12:00:00Z"
+
+    t1_prompt = 10800 + rng.rand_range(10, 90)
+    t1_out = 340
+    t2_prompt = 13400 + rng.rand_range(10, 90)
+    t2_out = 515
+
+    session_id = aider_analytics_session_id(
+        started_ts, 1, anon_user_id, model, t1_prompt, t1_out
+    )
+
+    records = [
+        {
+            "event": "launched",
+            "properties": {
+                "edit_format": "diff",
+                "editor_model": None,
+                "main_model": model,
+                "version": version,
+                "weak_model": "claude-haiku-4-5",
+            },
+            "time": base_epoch,
+            "user_id": anon_user_id,
+        },
+        {
+            "event": "message_send",
+            "properties": {
+                "completion_tokens": t1_out,
+                "cost": 0.0412,
+                "edit_format": "diff",
+                "editor_model": None,
+                "main_model": model,
+                "prompt_tokens": t1_prompt,
+                "total_cost": 0.0412,
+                "total_tokens": t1_prompt + t1_out,
+                "version": version,
+                "weak_model": "claude-haiku-4-5",
+            },
+            "time": base_epoch + 10,
+            "user_id": anon_user_id,
+        },
+        {
+            "event": "message_send",
+            "properties": {
+                "completion_tokens": t2_out,
+                "cost": 0.0528,
+                "edit_format": "diff",
+                "editor_model": None,
+                "main_model": model,
+                "prompt_tokens": t2_prompt,
+                "total_cost": 0.094,
+                "total_tokens": t2_prompt + t2_out,
+                "version": version,
+                "weak_model": "claude-haiku-4-5",
+            },
+            "time": base_epoch + 45,
+            "user_id": anon_user_id,
+        },
+        {
+            "event": "exit",
+            "properties": {
+                "reason": "Ctrl-D",
+                "version": version,
+            },
+            "time": base_epoch + 60,
+            "user_id": anon_user_id,
+        },
+    ]
+
+    turns_gt = [
+        {
+            "added_blocks": [],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t1_prompt,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T12:00:10Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": 0,
+                "cache_write": 0,
+                "confidence": "estimated",
+                "fresh_in": t1_prompt,
+                "output": t1_out,
+                "reasoning": None,
+            },
+        },
+        {
+            "added_blocks": [],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t2_prompt,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T12:00:45Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": 0,
+                "cache_write": 0,
+                "confidence": "estimated",
+                "fresh_in": t2_prompt,
+                "output": t2_out,
+                "reasoning": None,
+            },
+        },
+    ]
+
+    expected = {
+        "agent": "aider",
+        "log_files": [log_rel],
+        "scenario": "analytics-log",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 2,
+                "model": model,
+                "session_id": session_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    base = "aider/analytics-log"
+    return {
+        f"{base}/{log_rel}": dumps_jsonl(records),
+        f"{base}/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_cursor_zero_tokens(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    log_rel = "cursor_kv.json"
+    composer_id = rng.uuid_str()
+    b_u1 = rng.uuid_str()
+    b_a1 = rng.uuid_str()
+    b_u2 = rng.uuid_str()
+    b_a2 = rng.uuid_str()
+    model = "claude-sonnet-4-5"
+
+    # 2026-10-31T13:00:00Z == 1793451600000 ms
+    base_ms = 1793451600000
+
+    u1_text = rng.synth_text(92)
+    a1_text = rng.synth_text(128)
+    u2_text = rng.synth_text(76)
+    a2_text = rng.synth_text(110)
+
+    kv_doc = {
+        "cursorDiskKV": [
+            {
+                "key": f"composerData:{composer_id}",
+                "value": {
+                    "_v": 3,
+                    "composerId": composer_id,
+                    "createdAt": base_ms,
+                    "fullConversationHeadersOnly": [
+                        {"bubbleId": b_u1, "type": 1},
+                        {"bubbleId": b_a1, "type": 2},
+                        {"bubbleId": b_u2, "type": 1},
+                        {"bubbleId": b_a2, "type": 2},
+                    ],
+                    "lastUpdatedAt": base_ms + 40000,
+                    "modelConfig": {"modelName": model},
+                    "name": "Synthetic zero-token composer",
+                    "workspaceUri": "file:///synthetic/workspace/cursor-zero",
+                },
+            },
+            {
+                "key": f"bubbleId:{composer_id}:{b_u1}",
+                "value": {
+                    "_v": 3,
+                    "bubbleId": b_u1,
+                    "createdAt": base_ms + 1000,
+                    "text": u1_text,
+                    "tokenCount": {"inputTokens": 0, "outputTokens": 0},
+                    "type": 1,
+                },
+            },
+            {
+                "key": f"bubbleId:{composer_id}:{b_a1}",
+                "value": {
+                    "_v": 3,
+                    "bubbleId": b_a1,
+                    "createdAt": base_ms + 10000,
+                    "modelInfo": {"modelName": model},
+                    "text": a1_text,
+                    "tokenCount": {"inputTokens": 0, "outputTokens": 0},
+                    "type": 2,
+                },
+            },
+            {
+                "key": f"bubbleId:{composer_id}:{b_u2}",
+                "value": {
+                    "_v": 3,
+                    "bubbleId": b_u2,
+                    "createdAt": base_ms + 20000,
+                    "text": u2_text,
+                    "type": 1,
+                },
+            },
+            {
+                "key": f"bubbleId:{composer_id}:{b_a2}",
+                "value": {
+                    "_v": 3,
+                    "bubbleId": b_a2,
+                    "createdAt": base_ms + 35000,
+                    "modelInfo": {"modelName": model},
+                    "text": a2_text,
+                    "type": 2,
+                },
+            },
+        ]
+    }
+
+    turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": 0,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T13:00:10Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": 0,
+                "cache_write": 0,
+                "confidence": "not_recorded",
+                "fresh_in": 0,
+                "output": 0,
+                "reasoning": None,
+            },
+        },
+        {
+            "added_blocks": [
+                {"bytes": len(u2_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": 0,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T13:00:35Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": 0,
+                "cache_write": 0,
+                "confidence": "not_recorded",
+                "fresh_in": 0,
+                "output": 0,
+                "reasoning": None,
+            },
+        },
+    ]
+
+    expected = {
+        "agent": "cursor",
+        "log_files": [log_rel],
+        "scenario": "zero-tokens",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 0,
+                "model": model,
+                "session_id": composer_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    base = "cursor/zero-tokens"
+    return {
+        f"{base}/{log_rel}": dumps_pretty_json(kv_doc),
+        f"{base}/expected.json": dumps_pretty_json(expected),
+    }
+
+
+def gen_cursor_estimated_tokens(rng: SplitMix64, seed: int) -> dict[str, bytes]:
+    log_rel = "cursor_kv.json"
+    composer_id = rng.uuid_str()
+    b_u1 = rng.uuid_str()
+    b_a1 = rng.uuid_str()
+    b_a2 = rng.uuid_str()
+    tool_call_id = rng.hex_id("call", 16)
+    model = "claude-sonnet-4-5"
+
+    # 2026-10-31T14:00:00Z == 1793455200000 ms
+    base_ms = 1793455200000
+
+    u1_text = rng.synth_text(104)
+    thinking_text = rng.synth_text(80)
+    a1_text = rng.synth_text(96)
+    tool_params = {"relativeWorkspacePath": "src/parser.rs"}
+    tool_raw_args = json.dumps(tool_params, sort_keys=True, separators=(",", ":"))
+    tool_params_bytes = len(tool_raw_args.encode("utf-8"))
+    tool_result_text = rng.synth_text(640)
+    a2_text = rng.synth_text(136)
+
+    t1_in = 11400 + rng.rand_range(0, 60)
+    t1_out = 260
+    t2_in = t1_in + 950
+    t2_out = 310
+
+    # Note: bubble rows are intentionally placed out of chronological key order so
+    # `fullConversationHeadersOnly` canonical ordering is exercised against ground truth.
+    kv_doc = {
+        "cursorDiskKV": [
+            {
+                "key": "workbench.panel.composer",
+                "value": {"pinned": True},
+            },
+            {
+                "key": f"composerData:{composer_id}",
+                "value": {
+                    "_v": 3,
+                    "composerId": composer_id,
+                    "createdAt": base_ms,
+                    "fullConversationHeadersOnly": [
+                        {"bubbleId": b_u1, "type": 1},
+                        {"bubbleId": b_a1, "type": 2},
+                        {"bubbleId": b_a2, "type": 2},
+                    ],
+                    "lastUpdatedAt": base_ms + 60000,
+                    "modelConfig": {"modelName": model},
+                    "name": "Synthetic estimated-token composer",
+                    "workspaceUri": "file:///synthetic/workspace/cursor-est",
+                },
+            },
+            {
+                "key": f"bubbleId:{composer_id}:{b_a2}",
+                "value": {
+                    "_v": 3,
+                    "bubbleId": b_a2,
+                    "createdAt": base_ms + 28000,
+                    "modelInfo": {"modelName": model},
+                    "text": a2_text,
+                    "tokenCount": {"inputTokens": t2_in, "outputTokens": t2_out},
+                    "type": 2,
+                },
+            },
+            {
+                "key": f"bubbleId:{composer_id}:{b_u1}",
+                "value": {
+                    "_v": 3,
+                    "bubbleId": b_u1,
+                    "createdAt": base_ms + 1000,
+                    "text": u1_text,
+                    "type": 1,
+                },
+            },
+            {
+                "key": f"bubbleId:{composer_id}:{b_a1}",
+                "value": {
+                    "_v": 3,
+                    "bubbleId": b_a1,
+                    "createdAt": base_ms + 12000,
+                    "modelInfo": {"modelName": model},
+                    "text": a1_text,
+                    "thinking": {"text": thinking_text},
+                    "tokenCount": {"inputTokens": t1_in, "outputTokens": t1_out},
+                    "toolFormerData": {
+                        "name": "read_file",
+                        "params": tool_params,
+                        "rawArgs": tool_raw_args,
+                        "result": tool_result_text,
+                        "status": "completed",
+                        "toolCallId": tool_call_id,
+                    },
+                    "type": 2,
+                },
+            },
+        ]
+    }
+
+    turns_gt = [
+        {
+            "added_blocks": [
+                {"bytes": len(u1_text.encode("utf-8")), "kind": "user_prompt", "tool": None},
+                {
+                    "bytes": len(thinking_text.encode("utf-8")),
+                    "kind": "assistant_thinking",
+                    "tool": None,
+                },
+                {"bytes": len(a1_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+                {"bytes": tool_params_bytes, "kind": "tool_use", "tool": "read_file"},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t1_in,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T14:00:12Z",
+            "turn": 1,
+            "usage": {
+                "cache_read": 0,
+                "cache_write": 0,
+                "confidence": "estimated",
+                "fresh_in": t1_in,
+                "output": t1_out,
+                "reasoning": None,
+            },
+        },
+        {
+            "added_blocks": [
+                {
+                    "bytes": len(tool_result_text.encode("utf-8")),
+                    "kind": "tool_result",
+                    "tool": "read_file",
+                },
+                {"bytes": len(a2_text.encode("utf-8")), "kind": "assistant_text", "tool": None},
+            ],
+            "hints": default_hints(),
+            "model": model,
+            "prompt_tokens": t2_in,
+            "rate_limit_used_percent": None,
+            "ts": "2026-10-31T14:00:28Z",
+            "turn": 2,
+            "usage": {
+                "cache_read": 0,
+                "cache_write": 0,
+                "confidence": "estimated",
+                "fresh_in": t2_in,
+                "output": t2_out,
+                "reasoning": None,
+            },
+        },
+    ]
+
+    expected = {
+        "agent": "cursor",
+        "log_files": [log_rel],
+        "scenario": "estimated-tokens",
+        "schema": "kakeibo.fixture-ground-truth/1",
+        "seed": seed,
+        "sessions": [
+            {
+                "ignored_records": 1,
+                "model": model,
+                "session_id": composer_id,
+                "totals": compute_session_totals(turns_gt),
+                "turns": turns_gt,
+            }
+        ],
+    }
+
+    base = "cursor/estimated-tokens"
+    return {
+        f"{base}/{log_rel}": dumps_pretty_json(kv_doc),
+        f"{base}/expected.json": dumps_pretty_json(expected),
+    }
+
+
 def generate_all(seed: int) -> dict[str, bytes]:
     rng = SplitMix64(seed)
     files: dict[str, bytes] = {}
@@ -3501,6 +4205,10 @@ def generate_all(seed: int) -> dict[str, bytes]:
         gen_gemini_legacy_json,
         gen_opencode_legacy_tree,
         gen_opencode_subagent_cost,
+        gen_aider_chat_history,
+        gen_aider_analytics_log,
+        gen_cursor_zero_tokens,
+        gen_cursor_estimated_tokens,
     ):
         # Derive an independent deterministic sub-seed per scenario so adding new
         # scenarios in later tasks never shifts existing scenario bytes!
