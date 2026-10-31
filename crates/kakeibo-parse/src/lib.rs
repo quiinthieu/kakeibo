@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod claude;
 pub mod codex;
 pub mod cwd;
+pub mod gemini;
 pub mod hash;
 pub mod line_reader;
 
@@ -13,7 +14,13 @@ pub use claude::{
     ClaudeParseOutput,
 };
 pub use codex::{parse_codex_file, parse_codex_reader, CodexParseOutput};
-pub use cwd::{extract_claude_session_cwds, extract_codex_session_cwds};
+pub use cwd::{
+    extract_claude_session_cwds, extract_codex_session_cwds, extract_gemini_session_cwds,
+};
+pub use gemini::{
+    parse_gemini_file, parse_gemini_file_with_options, parse_gemini_reader, GeminiParseOptions,
+    GeminiParseOutput,
+};
 pub use line_reader::{
     BoundedLineReader, LineReadOutcome, ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics,
     DEFAULT_MAX_LINE_BYTES,

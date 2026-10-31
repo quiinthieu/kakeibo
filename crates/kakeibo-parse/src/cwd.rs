@@ -5,12 +5,13 @@
 //! exports never call these helpers and drop raw `cwd` strings immediately.
 
 use std::collections::BTreeMap;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
 
 use serde::Deserialize;
 
 use crate::catalog::open_readonly;
+use crate::gemini::resolve_gemini_raw_cwd;
 use crate::line_reader::{BoundedLineReader, LineReadOutcome, DEFAULT_MAX_LINE_BYTES};
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
@@ -142,4 +143,87 @@ pub fn extract_codex_session_cwds(path: &Path) -> io::Result<BTreeMap<String, St
     } else {
         read_codex_cwds(peek_reader, false)
     }
+}
+
+#[derive(Deserialize)]
+struct MinimalGeminiMeta {
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+    #[serde(default)]
+    directories: Vec<String>,
+    #[serde(rename = "$set")]
+    set_meta: Option<MinimalGeminiSetMeta>,
+}
+
+#[derive(Deserialize)]
+struct MinimalGeminiSetMeta {
+    #[serde(default)]
+    directories: Vec<String>,
+}
+
+/// Reads a Gemini CLI `.jsonl` or `.json` file read-only along with the preloaded
+/// `slug -> raw_cwd` registry to map `session_id -> raw_cwd` strictly for opt-in
+/// `export --show-paths`.
+pub fn extract_gemini_session_cwds(
+    path: &Path,
+    slug_registry: &BTreeMap<String, String>,
+) -> io::Result<BTreeMap<String, String>> {
+    let mut session_id: Option<String> = None;
+    let mut fallback_dir: Option<String> = None;
+
+    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        let file = open_readonly(path)?;
+        let mut raw = String::new();
+        file.take(16 * 1024 * 1024).read_to_string(&mut raw)?;
+        if let Ok(parsed) = serde_json::from_str::<MinimalGeminiMeta>(&raw) {
+            session_id = parsed.session_id.filter(|s| !s.trim().is_empty());
+            fallback_dir = parsed
+                .directories
+                .into_iter()
+                .find(|d| !d.trim().is_empty());
+        }
+    } else {
+        let file = open_readonly(path)?;
+        let mut reader =
+            BoundedLineReader::with_max_line_bytes(BufReader::new(file), DEFAULT_MAX_LINE_BYTES);
+        while let Some(outcome) = reader.next_line()? {
+            let LineReadOutcome::Line { text, .. } = outcome else {
+                continue;
+            };
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_str::<MinimalGeminiMeta>(trimmed) else {
+                continue;
+            };
+            if session_id.is_none() {
+                session_id = parsed.session_id.filter(|s| !s.trim().is_empty());
+            }
+            if fallback_dir.is_none() {
+                fallback_dir = parsed
+                    .directories
+                    .into_iter()
+                    .chain(parsed.set_meta.map(|s| s.directories).unwrap_or_default())
+                    .find(|d| !d.trim().is_empty());
+            }
+            if session_id.is_some() && fallback_dir.is_some() {
+                break;
+            }
+        }
+    }
+
+    let sid = session_id.or_else(|| {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    });
+    let raw_cwd = resolve_gemini_raw_cwd(Some(path), Some(slug_registry)).or(fallback_dir);
+
+    let mut out = BTreeMap::new();
+    if let (Some(sid), Some(cwd)) = (sid, raw_cwd) {
+        out.insert(sid, cwd);
+    }
+    Ok(out)
 }
