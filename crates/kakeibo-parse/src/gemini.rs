@@ -13,6 +13,7 @@ use kakeibo_core::{
     AgentId, BlockKind, Confidence, ContentBlock, InclusiveUsageInput, Timestamp, TurnHints,
     TurnRecord, Usage,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::catalog::{open_readonly, read_gemini_slug_registry_at};
@@ -20,9 +21,12 @@ use crate::hash::{
     canonical_json_byte_len, estimate_tokens, hash_cwd, measure_and_hash_tool_input,
 };
 use crate::line_reader::{
-    BoundedLineReader, LineReadOutcome, ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics,
+    open_seeked_counting_reader, BoundedLineReader, CountingReader, IncrementalParseResult,
+    LineReadOutcome, ParseDiagnostic, ParseDiagnosticKind, ParseDiagnostics, ReadCounter,
     DEFAULT_MAX_LINE_BYTES,
 };
+
+const GEMINI_CHECKPOINT_SCHEMA_V1: u32 = 1;
 
 /// Upper bound when reading a legacy single-object `session-*.json` file (`64 MiB`).
 const MAX_LEGACY_JSON_BYTES: u64 = 64 * 1024 * 1024;
@@ -62,7 +66,59 @@ pub fn parse_gemini_file_with_options(
     parse_gemini_reader(reader, Some(path), options)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Incrementally decodes or resumes a Gemini CLI `.jsonl` (or cold legacy `.json`) transcript
+/// from `start_offset` and an optional serialized checkpoint (`PLAN.md` §7, §10 T12).
+pub fn parse_gemini_file_incremental(
+    path: &Path,
+    options: &GeminiParseOptions,
+    start_offset: u64,
+    prev_checkpoint_json: Option<&str>,
+    counter: Option<&ReadCounter>,
+) -> io::Result<IncrementalParseResult<GeminiParseOutput>> {
+    let is_json_ext = path.extension().and_then(|e| e.to_str()) == Some("json");
+    if is_json_ext {
+        let file = open_readonly(path)?;
+        if let Some(c) = counter {
+            c.record_file_open();
+        }
+        let counting = CountingReader::new(file, counter);
+        let output = parse_legacy_gemini_json(counting, Some(path), options)?;
+        return Ok(IncrementalParseResult {
+            output,
+            committed_offset: 0,
+            checkpoint_json: None,
+        });
+    }
+
+    let parsed_checkpoint = if start_offset > 0 {
+        prev_checkpoint_json
+            .and_then(|raw| serde_json::from_str::<GeminiStreamCheckpoint>(raw).ok())
+            .filter(|cp| cp.schema_version == GEMINI_CHECKPOINT_SCHEMA_V1)
+    } else {
+        None
+    };
+
+    let effective_offset = if parsed_checkpoint.is_some() {
+        start_offset
+    } else {
+        0
+    };
+
+    let (reader, fell_back_to_zero) = open_seeked_counting_reader(path, effective_offset, counter)?;
+    if fell_back_to_zero || effective_offset == 0 {
+        parse_gemini_jsonl_reader_incremental(reader, Some(path), options, 0, None)
+    } else {
+        parse_gemini_jsonl_reader_incremental(
+            reader,
+            Some(path),
+            options,
+            effective_offset,
+            parsed_checkpoint,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum GeminiMsgType {
     User,
     Gemini,
@@ -84,7 +140,7 @@ impl GeminiMsgType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct RawGeminiTokens {
     input: u64,
     output: u64,
@@ -124,7 +180,7 @@ impl RawGeminiTokens {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompactGeminiToolCall {
     id: String,
     name: String,
@@ -134,7 +190,7 @@ struct CompactGeminiToolCall {
     is_error: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompactGeminiMessage {
     id: String,
     msg_type: GeminiMsgType,
@@ -147,7 +203,7 @@ struct CompactGeminiMessage {
     mentions_compaction: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct GeminiConversationMeta {
     session_id: Option<String>,
     start_time: Option<Timestamp>,
@@ -327,11 +383,18 @@ fn is_safe_type_token(raw: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'$'))
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct GeminiReconstructor {
     meta: GeminiConversationMeta,
     messages: Vec<CompactGeminiMessage>,
     diagnostics: ParseDiagnostics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GeminiStreamCheckpoint {
+    schema_version: u32,
+    line_number: usize,
+    recon: GeminiReconstructor,
 }
 
 impl GeminiReconstructor {
@@ -801,11 +864,16 @@ impl GeminiReconstructor {
             .or_insert(0) += 1;
     }
 
-    fn finish(
-        mut self,
+    fn finish(self, source_path: Option<&Path>, options: &GeminiParseOptions) -> GeminiParseOutput {
+        self.materialize_output(source_path, options)
+    }
+
+    fn materialize_output(
+        &self,
         source_path: Option<&Path>,
         options: &GeminiParseOptions,
     ) -> GeminiParseOutput {
+        let mut diagnostics = self.diagnostics.clone();
         let session_id = self
             .meta
             .session_id
@@ -838,7 +906,7 @@ impl GeminiReconstructor {
         let mut last_model: Option<String> = None;
         let mut turn_num: u32 = 0;
 
-        for msg in self.messages {
+        for msg in &self.messages {
             match msg.msg_type {
                 GeminiMsgType::User => {
                     if let Some(bytes) = msg.content_bytes {
@@ -856,18 +924,18 @@ impl GeminiReconstructor {
                     }
                 }
                 GeminiMsgType::Error => {
-                    self.diagnostics.ignored_records += 1;
+                    diagnostics.ignored_records += 1;
                     pending_api_error = true;
                 }
                 GeminiMsgType::Info | GeminiMsgType::Warning => {
-                    self.diagnostics.ignored_records += 1;
+                    diagnostics.ignored_records += 1;
                     if msg.mentions_compaction {
                         pending_compaction = true;
                     }
                 }
                 GeminiMsgType::Gemini => {
                     let Some(tok) = msg.tokens else {
-                        self.diagnostics.ignored_records += 1;
+                        diagnostics.ignored_records += 1;
                         continue;
                     };
                     let Some(ts) = msg
@@ -876,7 +944,7 @@ impl GeminiReconstructor {
                         .or(self.meta.last_updated)
                         .or(self.meta.start_time)
                     else {
-                        self.diagnostics.issues.push(ParseDiagnostic {
+                        diagnostics.issues.push(ParseDiagnostic {
                             line_number: 1,
                             kind: ParseDiagnosticKind::MissingField { field: "timestamp" },
                         });
@@ -884,7 +952,7 @@ impl GeminiReconstructor {
                     };
                     last_ts = Some(ts);
 
-                    let model = msg.model.or_else(|| last_model.clone());
+                    let model = msg.model.clone().or_else(|| last_model.clone());
                     if model.is_some() {
                         last_model.clone_from(&model);
                     }
@@ -905,7 +973,7 @@ impl GeminiReconstructor {
                         });
 
                     let mut added = mem::take(&mut pending_input_blocks);
-                    for th_bytes in msg.thought_blocks {
+                    for &th_bytes in &msg.thought_blocks {
                         if th_bytes > 0 {
                             added.push(ContentBlock {
                                 kind: BlockKind::AssistantThinking,
@@ -927,13 +995,13 @@ impl GeminiReconstructor {
                             is_error: false,
                         });
                     }
-                    for tc in msg.tool_calls {
+                    for tc in &msg.tool_calls {
                         added.push(ContentBlock {
                             kind: BlockKind::ToolUse,
                             est_tokens: estimate_tokens(tc.args_bytes),
                             bytes: tc.args_bytes,
                             tool: Some(tc.name.clone()),
-                            key_hash: Some(tc.key_hash),
+                            key_hash: Some(tc.key_hash.clone()),
                             is_error: false,
                         });
                         if let Some(res_bytes) = tc.result_bytes {
@@ -941,7 +1009,7 @@ impl GeminiReconstructor {
                                 kind: BlockKind::ToolResult,
                                 est_tokens: estimate_tokens(res_bytes),
                                 bytes: res_bytes,
-                                tool: Some(tc.name),
+                                tool: Some(tc.name.clone()),
                                 key_hash: None,
                                 is_error: tc.is_error,
                             });
@@ -976,7 +1044,7 @@ impl GeminiReconstructor {
 
         GeminiParseOutput {
             records,
-            diagnostics: self.diagnostics,
+            diagnostics,
         }
     }
 }
@@ -1124,11 +1192,38 @@ pub fn parse_gemini_reader<R: BufRead>(
         return parse_legacy_gemini_json(reader, source_path, options);
     }
 
-    let max_line = options.max_line_bytes.unwrap_or(DEFAULT_MAX_LINE_BYTES);
-    let mut line_reader = BoundedLineReader::with_max_line_bytes(reader, max_line);
-    let mut recon = GeminiReconstructor::default();
+    Ok(parse_gemini_jsonl_reader_incremental(reader, source_path, options, 0, None)?.output)
+}
 
-    while let Some(outcome) = line_reader.next_line()? {
+fn parse_gemini_jsonl_reader_incremental<R: BufRead>(
+    reader: R,
+    source_path: Option<&Path>,
+    options: &GeminiParseOptions,
+    start_offset: u64,
+    checkpoint: Option<GeminiStreamCheckpoint>,
+) -> io::Result<IncrementalParseResult<GeminiParseOutput>> {
+    let max_line = options.max_line_bytes.unwrap_or(DEFAULT_MAX_LINE_BYTES);
+    let (start_line, mut recon) = match checkpoint {
+        Some(cp) => (cp.line_number, cp.recon),
+        None => (0, GeminiReconstructor::default()),
+    };
+
+    let mut line_reader =
+        BoundedLineReader::with_offset_and_line(reader, max_line, start_offset, start_line);
+    let mut trailing_partial_snapshot: Option<(u64, GeminiStreamCheckpoint)> = None;
+
+    while let Some((meta, outcome)) = line_reader.next_line_with_meta()? {
+        if !meta.ended_with_newline && trailing_partial_snapshot.is_none() {
+            trailing_partial_snapshot = Some((
+                meta.offset_before,
+                GeminiStreamCheckpoint {
+                    schema_version: GEMINI_CHECKPOINT_SCHEMA_V1,
+                    line_number: meta.line_number.saturating_sub(1),
+                    recon: recon.clone(),
+                },
+            ));
+        }
+
         match outcome {
             LineReadOutcome::Oversized {
                 line_number,
@@ -1168,5 +1263,23 @@ pub fn parse_gemini_reader<R: BufRead>(
         }
     }
 
-    Ok(recon.finish(source_path, options))
+    let output = recon.materialize_output(source_path, options);
+    let (committed_offset, committed_checkpoint) = match trailing_partial_snapshot {
+        Some(snap) => snap,
+        None => (
+            line_reader.bytes_consumed(),
+            GeminiStreamCheckpoint {
+                schema_version: GEMINI_CHECKPOINT_SCHEMA_V1,
+                line_number: line_reader.line_number(),
+                recon,
+            },
+        ),
+    };
+
+    let checkpoint_json = serde_json::to_string(&committed_checkpoint).ok();
+    Ok(IncrementalParseResult {
+        output,
+        committed_offset,
+        checkpoint_json,
+    })
 }

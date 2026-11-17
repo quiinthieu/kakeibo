@@ -217,7 +217,7 @@ Each task fits one agent session. **M1 is the MVP**: autopsy and flags for Claud
   *AC:* scenarios match ground truth; DB unchanged (hash + mtime) while another connection holds a write lock.
 - [x] **T11 Aider + Cursor (best effort).** History/analytics parsing; `state.vscdb` reader.
   *AC:* fixtures parse; zero Cursor counts render as "not recorded"; all labelled `estimated`.
-- [ ] **T12 Incremental index & perf.** Index (ADR: SQLite vs files), offset resume, truncation detection, rayon, pre-filter.
+- [x] **T12 Incremental index & perf.** Index (ADR: SQLite vs files), offset resume, truncation detection, rayon, pre-filter.
   *AC:* cached == uncached (property); append re-reads only new bytes (counter); 1 GB bench in `docs/perf.md`.
 
 ### M3 Deeper flags & surfaces
